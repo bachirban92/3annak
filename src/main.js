@@ -372,5 +372,11 @@ async function agentStatus(id,status){
 }
 
 window.addEventListener('hashchange',render);
-supabase.auth.onAuthStateChange(async(_e,s)=>{session=s;profile=null;if(s)await load();render()});
-await load();render();
+
+try {
+  await load();
+  render();
+} catch (err) {
+  console.error(err);
+  app.innerHTML='<main><section class="card narrow"><h2>تعذر فتح الصفحة</h2><p>حدّث الصفحة وحاول مرة أخرى.</p></section></main>';
+}
