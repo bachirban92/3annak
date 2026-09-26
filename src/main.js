@@ -1,4 +1,3 @@
-import './styles.css';
 import { supabase } from './supabase.js';
 
 const app=document.querySelector('#app');
