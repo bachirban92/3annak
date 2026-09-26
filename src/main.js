@@ -144,6 +144,7 @@ async function agentPortal(){
     return bind();
   }
 
+  await supabase.rpc('refresh_agent_dispatch');
   const [{data:available},{data:mine},{data:coverage},{data:balance}]=await Promise.all([
     supabase.rpc('list_available_orders'),
     supabase.from('orders').select('*').eq('assigned_agent_id',session.user.id).not('status','in','("completed","cancelled")').order('accepted_at',{ascending:false}),
