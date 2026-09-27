@@ -103,12 +103,13 @@ async function orders(){
 }
 async function customerDetail(id){
   clearLive();
-  const [{data:o,error},{data:e},{data:d},{data:i},{data:reqs}]=await Promise.all([
+  const [{data:o,error},{data:e},{data:d},{data:i},{data:reqs},{data:feedback}]=await Promise.all([
     supabase.from('orders').select('*').eq('id',id).single(),
     supabase.from('order_events').select('*').eq('order_id',id).order('created_at'),
     supabase.from('documents').select('*').eq('order_id',id).eq('visible_to_customer',true).order('created_at'),
     supabase.from('order_items').select('*').eq('order_id',id),
-    supabase.from('order_requirements').select('*').eq('order_id',id).order('created_at')
+    supabase.from('order_requirements').select('*').eq('order_id',id).order('created_at'),
+    supabase.rpc('get_order_feedback',{p_order_id:id})
   ]);
   if(error)return toast(error.message,true);
   app.innerHTML=shell(`<section class="card">
@@ -118,11 +119,44 @@ async function customerDetail(id){
       <span>${(i||[]).map(x=>esc(x.service_name_ar)).join('، ')}</span>
       <strong>${money(o.total_amount)}</strong>
     </div>
+    ${o.status==='completed'?`<div class="completebox"><span class="completecheck">✓</span><div><b>اكتمل الطلب</b><small>مستنداتك جاهزة أدناه.</small></div></div>`:''}
     ${renderRequirements(reqs||[])}
-    ${o.expected_ready_at?`<div class="eta"><small>الوقت المتوقع</small><b>${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}</b></div>`:''}
+    ${o.expected_ready_at&&o.status!=='completed'?`<div class="eta"><small>الوقت المتوقع</small><b>${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}</b></div>`:''}
+
+    ${o.status==='completed'?`
+      <h3>المستندات</h3>
+      <div class="stack">
+        ${(d||[]).filter(x=>x.kind==='final_document').map(x=>`<button class="download full" data-download="${esc(x.storage_path)}">${esc(x.original_name||'فتح المستند')}</button>`).join('')||'<div class="empty">لا يوجد مستند نهائي مرفوع بعد.</div>'}
+      </div>
+
+      <h3>التقييم</h3>
+      ${feedback?.rating
+        ?`<div class="feedbackdone"><b>${'★'.repeat(Number(feedback.rating.rating||0))}</b><small>${esc(feedback.rating.comment||'تم إرسال تقييمك.')}</small></div>`
+        :`<form id="ratingForm" data-order-id="${o.id}" class="feedbackform">
+            <select name="rating" required>
+              <option value="">اختر التقييم</option>
+              <option value="5">★★★★★</option>
+              <option value="4">★★★★</option>
+              <option value="3">★★★</option>
+              <option value="2">★★</option>
+              <option value="1">★</option>
+            </select>
+            <textarea name="comment" placeholder="ملاحظة (اختياري)"></textarea>
+            <button class="secondary full">إرسال التقييم</button>
+          </form>`}
+
+      <h3>الدعم</h3>
+      ${feedback?.dispute && ['open','reviewing'].includes(feedback.dispute.status)
+        ?`<div class="feedbackdone"><b>طلب الدعم مفتوح</b><small>${esc(feedback.dispute.reason)}</small></div>`
+        :`<form id="supportForm" data-order-id="${o.id}" class="feedbackform">
+            <textarea name="reason" required minlength="3" placeholder="اشرح المشكلة باختصار"></textarea>
+            <button class="secondary full">طلب دعم</button>
+          </form>`}
+    `:''}
+
     <h3>التتبّع</h3>
     <div class="timeline">${(e||[]).map(x=>`<div><b>${esc(x.label_ar)}</b><small>${new Date(x.created_at).toLocaleString('ar-LB')}</small></div>`).join('')}</div>
-    ${(d||[]).map(x=>`<button class="download full" data-download="${esc(x.storage_path)}">${esc(x.original_name||'فتح المستند')}</button>`).join('')}
+    ${o.status!=='completed'?(d||[]).filter(x=>x.kind==='final_document').map(x=>`<button class="download full" data-download="${esc(x.storage_path)}">${esc(x.original_name||'فتح المستند')}</button>`).join(''):''}
     ${o.status==='submitted'?`<button class="danger full" data-cancel="${o.id}">إلغاء الطلب</button>`:''}
   </section>`);
   bind();
@@ -636,6 +670,40 @@ function bind(){
     busy(b,false);
     if(error)return toast(error.message,true);
     staffLogin.innerHTML='<div class="loginSent"><b>تم إرسال رابط الدخول.</b><small>افتح بريدك واضغط الرابط للمتابعة.</small></div>';
+  };
+
+  const ratingForm=document.querySelector('#ratingForm');
+  if(ratingForm)ratingForm.onsubmit=async e=>{
+    e.preventDefault();
+    const d=new FormData(ratingForm),b=ratingForm.querySelector('button');
+    busy(b,true);
+    const {error}=await supabase.rpc('submit_rating',{
+      p_order_id:ratingForm.dataset.orderId,
+      p_rating:+d.get('rating'),
+      p_comment:d.get('comment')||''
+    });
+    busy(b,false);
+    error?toast(error.message,true):(toast('شكراً لتقييمك'),customerDetail(ratingForm.dataset.orderId));
+  };
+
+  const supportForm=document.querySelector('#supportForm');
+  if(supportForm)supportForm.onsubmit=async e=>{
+    e.preventDefault();
+    const d=new FormData(supportForm),b=supportForm.querySelector('button');
+    const reason=String(d.get('reason')||'').trim();
+    if(reason.length<3)return toast('اشرح المشكلة باختصار',true);
+    busy(b,true);
+    const {error}=await supabase.rpc('open_dispute',{
+      p_order_id:supportForm.dataset.orderId,
+      p_reason:reason
+    });
+    busy(b,false);
+    if(error){
+      const msg=error.message==='dispute_already_open'?'يوجد طلب دعم مفتوح لهذا الطلب':error.message;
+      return toast(msg,true);
+    }
+    toast('تم إرسال طلب الدعم');
+    customerDetail(supportForm.dataset.orderId);
   };
 
   const order=document.querySelector('#order');
