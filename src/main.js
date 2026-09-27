@@ -635,10 +635,10 @@ async function adminAccess(){
   app.innerHTML=shell(`<section class="card narrow adminlogin">
     <div class="title"><h2>دخول الإدارة</h2><button data-go="home">رجوع</button></div>
     <form id="adminLogin">
-      <input name="email" type="email" autocomplete="email" required placeholder="البريد الإلكتروني">
-      <button class="primary full">إرسال رابط الدخول</button>
+      <input name="email" type="email" autocomplete="username" required placeholder="البريد الإلكتروني" value="bachir.ban@gmail.com">
+      <input name="password" type="password" autocomplete="current-password" required placeholder="كلمة المرور">
+      <button class="primary full">دخول</button>
     </form>
-    <small class="adminhint">الدخول متاح فقط للحساب الإداري المعتمد.</small>
   </section>`);
   bind();
 }
@@ -1235,19 +1235,33 @@ function bind(){
   const adminLogin=document.querySelector('#adminLogin');
   if(adminLogin)adminLogin.onsubmit=async e=>{
     e.preventDefault();
-    const fd=new FormData(adminLogin),email=String(fd.get('email')||'').trim().toLowerCase();
+    const fd=new FormData(adminLogin);
+    const email=String(fd.get('email')||'').trim().toLowerCase();
+    const password=String(fd.get('password')||'');
     const b=adminLogin.querySelector('button');
-    if(email!=='bachir.ban@gmail.com')return toast('هذا البريد غير مخوّل للإدارة.',true);
-    busy(b,true,'جارٍ الإرسال...');
-    await supabase.auth.signOut();
-    const redirect=new URL('./#admin',location.href).href;
-    const {error}=await supabase.auth.signInWithOtp({
-      email,
-      options:{emailRedirectTo:redirect,shouldCreateUser:true}
-    });
-    busy(b,false);
-    if(error)return toast(error.message,true);
-    adminLogin.innerHTML='<div class="loginSent"><b>تم إرسال رابط الدخول.</b><small>افتح بريدك واضغط الرابط للمتابعة.</small></div>';
+
+    busy(b,true,'جارٍ الدخول...');
+    await supabase.auth.signOut({scope:'local'});
+
+    const {data,error}=await supabase.auth.signInWithPassword({email,password});
+    if(error){
+      busy(b,false);
+      return toast('البريد أو كلمة المرور غير صحيحة.',true);
+    }
+
+    session=data.session;
+    await load();
+
+    if(profile?.role!=='admin'){
+      await supabase.auth.signOut({scope:'local'});
+      session=null;profile=null;
+      await load();
+      busy(b,false);
+      return toast('هذا الحساب غير مخوّل للإدارة.',true);
+    }
+
+    toast('تم تسجيل الدخول');
+    go('admin');
   };
 
   const ratingForm=document.querySelector('#ratingForm');
