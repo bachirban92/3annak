@@ -223,13 +223,14 @@ async function agentPortal(){
   }
 
   await supabase.rpc('refresh_agent_dispatch');
-  const [{data:available},{data:mine},{data:completed},{data:coverage},{data:balance},{data:notifications}]=await Promise.all([
+  const [{data:available},{data:mine},{data:completed},{data:coverage},{data:balance},{data:notifications},{data:payouts}]=await Promise.all([
     supabase.rpc('list_available_orders'),
     supabase.from('orders').select('*').eq('assigned_agent_id',session.user.id).not('status','in','("completed","cancelled")').order('accepted_at',{ascending:false}),
     supabase.from('orders').select('*').eq('assigned_agent_id',session.user.id).eq('status','completed').order('completed_at',{ascending:false}).limit(20),
     supabase.from('agent_coverage').select('*').eq('agent_id',session.user.id).eq('active',true),
     supabase.rpc('get_agent_balance'),
-    supabase.from('notifications').select('*').eq('user_id',session.user.id).order('created_at',{ascending:false}).limit(5)
+    supabase.from('notifications').select('*').eq('user_id',session.user.id).order('created_at',{ascending:false}).limit(5),
+    supabase.from('payouts').select('*').eq('agent_id',session.user.id).order('created_at',{ascending:false}).limit(10)
   ]);
   const bal=balance?.[0]||{pending:0,available:0};
 
@@ -259,6 +260,9 @@ async function agentPortal(){
 
     <h3 class="sectionicon">${icon('check')}<span>طلبات مكتملة</span></h3>
     <div class="stack">${(completed||[]).map(o=>`<button class="row" data-agent-order="${o.id}"><span><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span><i>تم التسليم</i></button>`).join('')||'<div class="empty">لا يوجد طلبات مكتملة بعد.</div>'}</div>
+
+    <h3>الدفعات</h3>
+    <div class="stack">${(payouts||[]).map(p=>`<div class="adminrow"><span><b>${money(p.amount)}</b><small>${new Date(p.created_at).toLocaleDateString('ar-LB')}${p.provider_reference?' • '+esc(p.provider_reference):''}</small></span><i>${p.status==='paid'?'مدفوع':p.status==='pending'?'قيد الدفع':'ملغى'}</i></div>`).join('')||'<div class="empty">لا توجد دفعات بعد.</div>'}</div>
 
     <h3 class="sectionicon">${icon('orders')}<span>آخر الإشعارات</span></h3>
     <div class="stack">${(notifications||[]).map(n=>`<div class="notice ${n.read_at?'':'unread'}"><b>${esc(n.title)}</b><small>${esc(n.body)}</small></div>`).join('')||'<div class="empty">لا يوجد إشعارات.</div>'}</div>
@@ -372,6 +376,21 @@ async function admin(){
     </button>`).join('')||'<div class="empty">لا يوجد.</div>'}</div>
     <h3>الخدمات والتسعير</h3>
     <div class="stack">${renderServicesAdmin(s||[],reqs||[])}</div>
+    <h3>الدفعات</h3>
+    <div class="payoutadmin">
+      <div class="payoutcreate">
+        <span><small>المتاح للدفع</small><b>${money(available)}</b></span>
+        <button class="primary" data-create-payout="${id}" ${available>0?'':'disabled'}>إنشاء دفعة</button>
+      </div>
+      <div class="stack">${(payouts||[]).map(p=>`<div class="adminrow">
+        <span><b>${money(p.amount)}</b><small>${new Date(p.created_at).toLocaleDateString('ar-LB')}${p.provider_reference?' • '+esc(p.provider_reference):''}</small></span>
+        <div class="verifyactions">
+          <i>${p.status==='paid'?'مدفوع':p.status==='pending'?'قيد الدفع':'ملغى'}</i>
+          ${p.status==='pending'?`<button class="primary compact" data-pay-payout="${p.id}" data-agent-id="${id}">تم الدفع</button><button class="secondary compact" data-cancel-payout="${p.id}" data-agent-id="${id}">إلغاء</button>`:''}
+        </div>
+      </div>`).join('')||'<div class="empty">لا توجد دفعات بعد.</div>'}</div>
+    </div>
+
     <h3>آخر الطلبات</h3>
     <div class="stack">${(o||[]).map(x=>`<button class="row" data-admin-order="${x.id}"><span><b>${x.public_code}</b><small>${esc(x.cadastral_area)} • ${esc(x.property_number)}</small></span><i>${labels[x.status]}</i></button>`).join('')}</div>
   </section>`);
@@ -381,20 +400,21 @@ async function adminAgent(id){
   clearLive();
   if(profile?.role!=='admin')return go('home');
 
-  const [{data:a,error},{data:p},{data:coverage},{data:orders},{data:ledger},{data:reqs},{data:docs}]=await Promise.all([
+  const [{data:a,error},{data:p},{data:coverage},{data:orders},{data:ledger},{data:reqs},{data:docs},{data:payouts}]=await Promise.all([
     supabase.from('agent_profiles').select('*').eq('user_id',id).single(),
     supabase.from('profiles').select('id,full_name,email,phone,is_active').eq('id',id).single(),
     supabase.from('agent_coverage').select('*').eq('agent_id',id).eq('active',true),
     supabase.from('orders').select('*').eq('assigned_agent_id',id).order('created_at',{ascending:false}).limit(30),
     supabase.from('agent_ledger').select('*').eq('agent_id',id).order('created_at',{ascending:false}).limit(100),
     supabase.from('agent_verification_requirements').select('*').eq('active',true).order('sort_order'),
-    supabase.from('agent_documents').select('*').eq('agent_id',id)
+    supabase.from('agent_documents').select('*').eq('agent_id',id),
+    supabase.from('payouts').select('*').eq('agent_id',id).order('created_at',{ascending:false}).limit(20)
   ]);
 
   if(error||!a)return toast(error?.message||'تعذر فتح الوكيل',true);
 
   const pending=(ledger||[]).filter(x=>x.status==='pending'&&x.entry_type!=='payout').reduce((s,x)=>s+Number(x.amount||0),0);
-  const available=(ledger||[]).filter(x=>x.status==='available'&&x.entry_type!=='payout').reduce((s,x)=>s+Number(x.amount||0),0);
+  const available=(ledger||[]).filter(x=>x.status==='available'&&x.entry_type!=='payout'&&!x.payout_id).reduce((s,x)=>s+Number(x.amount||0),0);
   const paid=(ledger||[]).filter(x=>x.status==='paid'&&x.entry_type!=='payout').reduce((s,x)=>s+Number(x.amount||0),0);
   const docsByReq=Object.fromEntries((docs||[]).map(d=>[d.requirement_id,d]));
   const docsApproved=(reqs||[]).filter(r=>r.required).every(r=>docsByReq[r.id]?.status==='approved');
@@ -687,6 +707,29 @@ function bind(){
     const u=URL.createObjectURL(data);
     window.open(u,'_blank');
     setTimeout(()=>URL.revokeObjectURL(u),60000);
+  });
+
+  document.querySelectorAll('[data-create-payout]').forEach(x=>x.onclick=async()=>{
+    busy(x,true);
+    const {error}=await supabase.rpc('create_payout_batch',{p_agent_id:x.dataset.createPayout,p_currency:'USD'});
+    busy(x,false);
+    error?toast(error.message==='no_available_balance'?'لا يوجد رصيد متاح للدفع':error.message,true):(toast('تم إنشاء الدفعة'),adminAgent(x.dataset.createPayout));
+  });
+
+  document.querySelectorAll('[data-pay-payout]').forEach(x=>x.onclick=async()=>{
+    const reference=prompt('مرجع التحويل (اختياري)')||'';
+    busy(x,true);
+    const {error}=await supabase.rpc('admin_mark_payout_paid',{p_payout_id:x.dataset.payPayout,p_provider:'manual',p_reference:reference});
+    busy(x,false);
+    error?toast(error.message,true):(toast('تم تسجيل الدفعة كمدفوعة'),adminAgent(x.dataset.agentId));
+  });
+
+  document.querySelectorAll('[data-cancel-payout]').forEach(x=>x.onclick=async()=>{
+    if(!confirm('إلغاء هذه الدفعة؟'))return;
+    busy(x,true);
+    const {error}=await supabase.rpc('admin_cancel_payout',{p_payout_id:x.dataset.cancelPayout});
+    busy(x,false);
+    error?toast(error.message,true):(toast('تم إلغاء الدفعة'),adminAgent(x.dataset.agentId));
   });
 
   document.querySelectorAll('[data-agent-doc-review]').forEach(x=>x.onclick=async()=>{
