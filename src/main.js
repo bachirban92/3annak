@@ -204,6 +204,11 @@ async function accountPage(){
         <div><small>مناطق العمل</small><b>${coverage.length||0}</b></div>
       </div>
       <small class="accountmuted">${coverage.map(x=>esc(x.governorate)+(x.district?' / '+esc(x.district):'')).join('، ')||'لا توجد مناطق عمل.'}</small>
+      <form id="coverage" class="coverage-account">
+        <select name="governorate" required><option value="">المحافظة</option>${gov.map(x=>`<option>${x}</option>`).join('')}</select>
+        <input name="district" placeholder="القضاء (اختياري)">
+        <button class="secondary full">تحديث منطقة العمل</button>
+      </form>
     </section>`:''}
 
     <section class="card">
@@ -1588,7 +1593,10 @@ function bind(){
   if(coverage)coverage.onsubmit=async e=>{
     e.preventDefault();const f=new FormData(coverage),b=coverage.querySelector('button');busy(b,true);
     const {error}=await supabase.rpc('replace_agent_coverage',{p_governorate:f.get('governorate'),p_district:f.get('district')||''});
-    busy(b,false);error?toast(error.message,true):(toast('تمت الإضافة'),agentPortal());
+    busy(b,false);
+    if(error)return toast(error.message,true);
+    toast('تم تحديث منطقة العمل');
+    location.hash==='#account'?accountPage():agentPortal();
   };
 
   document.querySelectorAll('[data-order]').forEach(x=>x.onclick=()=>customerDetail(x.dataset.order));
