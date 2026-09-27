@@ -803,7 +803,9 @@ async function agentPortal(){
       ?{title:'الخطوة التالية',text:nextStep.label_ar,kind:'action'}
       :missing
         ?{title:'مطلوب منك',text:`ارفع ${missing} مستند نهائي`,kind:'action'}
-        :{title:'الخطوة التالية',text:'إكمال الطلب',kind:'action'};
+        :o.delivery_mode==='hard_copy'&&!o.hard_copy_delivered_at
+          ?{title:'مطلوب منك',text:'توصيل النسخة الورقية للعميل',kind:'action'}
+          :{title:'الخطوة التالية',text:'إكمال الطلب',kind:'action'};
   }
 
   app.innerHTML=shell(`<section class="role-dashboard">
