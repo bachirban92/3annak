@@ -33,9 +33,10 @@ function toast(msg,bad=false){
 function clearLive(){if(liveChannel){supabase.removeChannel(liveChannel);liveChannel=null}}
 function shell(body){
   let right='';
+  const anonymous=session?.user?.is_anonymous===true;
   if(profile?.role==='agent') right='';
   else if(profile?.role==='admin') right=`<button class="toplink withicon" data-go="admin">${icon('settings')}<span>الإدارة</span></button>`;
-  else right=`<button class="toplink withicon" data-go="orders">${icon('orders')}<span>طلباتي</span></button>`;
+  else if(!anonymous) right=`<button class="toplink withicon" data-go="orders">${icon('orders')}<span>طلباتي</span></button>`;
   return `<header><button class="brand" data-go="home">عنّك</button>${right}</header><main>${body}</main>`;
 }
 async function load(){
