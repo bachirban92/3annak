@@ -92,7 +92,8 @@ async function customerDetail(id){
     supabase.from('order_items').select('*').eq('order_id',id),
     supabase.from('order_requirements').select('*').eq('order_id',id).order('created_at'),
     supabase.rpc('get_order_feedback',{p_order_id:id}),
-    supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order')
+    supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order'),
+    supabase.from('order_workflow_steps').select('*').eq('order_id',id).order('sort_order')
   ]);
   if(error)return toast(error.message,true);
   const incompleteRequired=(reqs||[]).filter(r=>r.required&&!r.completed_at);
@@ -309,7 +310,7 @@ async function agentPortal(){
 }
 async function agentJob(id){
   clearLive();
-  const [{data:rows,error},{data:events},{data:docs},{data:deliverables}]=await Promise.all([
+  const [{data:rows,error},{data:events},{data:docs},{data:deliverables},{data:workflow}]=await Promise.all([
     supabase.rpc('get_agent_job',{p_order_id:id}),
     supabase.from('order_events').select('*').eq('order_id',id).order('created_at'),
     supabase.from('documents').select('*').eq('order_id',id).order('created_at'),
@@ -317,14 +318,12 @@ async function agentJob(id){
   ]);
   const o=rows?.[0];
   if(error||!o)return toast(error?.message||'تعذر فتح الطلب',true);
-  const next={
-    accepted:['in_progress','بدء العمل'],
-    in_progress:['submitted_to_authority','تم تقديم المعاملة'],
-    submitted_to_authority:['processing','قيد المعالجة'],
-    processing:['ready_for_collection','جاهز للاستلام'],
-    ready_for_collection:['collected','تم استلام المستند'],
-    collected:['completed','إكمال الطلب']
-  }[o.status];
+  const pendingStep=(workflow||[]).find(x=>!x.completed_at);
+  const next=o.status==='completed'||o.status==='cancelled'
+    ?null
+    :pendingStep
+      ?[pendingStep.status,pendingStep.label_ar]
+      :['completed','إكمال الطلب'];
   const finalDocs=(docs||[]).filter(x=>x.kind==='final_document'&&x.deliverable_id);
   const docByDeliverable=Object.fromEntries(finalDocs.map(x=>[x.deliverable_id,x]));
   const missingDeliverables=(deliverables||[]).filter(x=>!docByDeliverable[x.id]);
@@ -355,6 +354,14 @@ async function agentJob(id){
             </div>
           </div>`;
         }).join('')}
+      </div>`:''}
+
+    ${(workflow||[]).length?`<h3>مراحل التنفيذ</h3>
+      <div class="workflowchecklist">
+        ${workflow.map((x,idx)=>`<div class="workflowstep ${x.completed_at?'done':(!x.completed_at&&workflow.findIndex(w=>!w.completed_at)===idx?'current':'')}">
+          <span>${x.completed_at?'✓':(!x.completed_at&&workflow.findIndex(w=>!w.completed_at)===idx?'•':'○')}</span>
+          <b>${esc(x.label_ar)}</b>
+        </div>`).join('')}
       </div>`:''}
 
     <h3>التتبّع</h3>
@@ -392,12 +399,13 @@ async function staffAccess(){
 async function admin(){
   clearLive();
   if(profile?.role!=='admin')return go('home');
-  const [{data:a},{data:s},{data:o},{data:reqs},{data:disputes}]=await Promise.all([
+  const [{data:a},{data:s},{data:o},{data:reqs},{data:disputes},{data:workflow}]=await Promise.all([
     supabase.from('agent_profiles').select('*').order('created_at',{ascending:false}),
     supabase.from('services').select('*').order('sort_order'),
     supabase.from('orders').select('*').order('created_at',{ascending:false}).limit(50),
     supabase.from('service_requirements').select('*').order('sort_order'),
-    supabase.from('disputes').select('*').in('status',['open','reviewing']).order('created_at',{ascending:false}).limit(20)
+    supabase.from('disputes').select('*').in('status',['open','reviewing']).order('created_at',{ascending:false}).limit(20),
+    supabase.from('service_workflow_steps').select('*').order('sort_order')
   ]);
   const ids=(a||[]).map(x=>x.user_id),names={};
   if(ids.length){
@@ -418,7 +426,7 @@ async function admin(){
     </button>`).join('')||'<div class="empty">لا توجد طلبات دعم مفتوحة.</div>'}</div>
 
     <h3>الخدمات والتسعير</h3>
-    <div class="stack">${renderServicesAdmin(s||[],reqs||[])}</div>
+    <div class="stack">${renderServicesAdmin(s||[],reqs||[],workflow||[])}</div>
     <h3>آخر الطلبات</h3>
     <div class="stack">${(o||[]).map(x=>`<button class="row" data-admin-order="${x.id}"><span><b>${x.public_code}</b><small>${esc(x.cadastral_area)} • ${esc(x.property_number)}</small></span><i>${labels[x.status]}</i></button>`).join('')}</div>
   </section>`);
@@ -886,7 +894,9 @@ function bind(){
     const {error}=await supabase.rpc('update_order_status',{p_order_id:x.dataset.id,p_status:x.dataset.status,p_note:''});
     if(error){
       busy(x,false);
-      toast(error.message==='deliverables_incomplete'?'أكمل المستندات النهائية أولاً':error.message,true);
+      const msg=error.message==='deliverables_incomplete'?'أكمل المستندات النهائية أولاً':
+        error.message==='workflow_incomplete'?'أكمل مراحل التنفيذ أولاً':error.message;
+      toast(msg,true);
     }else{toast('تم تحديث الحالة');agentJob(x.dataset.id)}
   });
 
