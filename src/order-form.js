@@ -1,4 +1,4 @@
-export function renderNewOrder({services,bundleItems,serviceRequirements,profile,gov,esc,money}){
+export function renderNewOrder({services,bundleItems,serviceRequirements,savedProperties=[],profile,gov,esc,money}){
   const byId=Object.fromEntries(services.map(s=>[s.id,s]));
   const bundleMap={};
   for(const row of bundleItems||[]){
@@ -33,6 +33,10 @@ export function renderNewOrder({services,bundleItems,serviceRequirements,profile
 
       <section class="flowstep orderdetails" id="orderDetails" hidden>
         <div class="stephead"><span>2</span><div><b>بيانات العقار</b><small>المعلومات التي تحدد العقار.</small></div></div>
+        ${savedProperties.length?`<select id="savedPropertySelect">
+          <option value="">إدخال عقار جديد</option>
+          ${savedProperties.map(p=>`<option value="${esc(p.id)}">${esc(p.label)} • ${esc(p.cadastral_area)} • ${esc(p.property_number)}</option>`).join('')}
+        </select>`:''}
         <div class="grid">
           <select name="governorate" required><option value="">المحافظة</option>${gov.map(x=>`<option>${esc(x)}</option>`).join('')}</select>
           <input name="district" placeholder="القضاء (اختياري)">
@@ -76,7 +80,7 @@ export function renderNewOrder({services,bundleItems,serviceRequirements,profile
   </section>`;
 }
 
-export function bindServiceSelection({services,bundleItems,serviceRequirements,money,toast}){
+export function bindServiceSelection({services,bundleItems,serviceRequirements,savedProperties=[],money,toast}){
   const form=document.querySelector('#order');
   if(!form)return;
 
@@ -206,6 +210,18 @@ export function bindServiceSelection({services,bundleItems,serviceRequirements,m
     const total=chosen.reduce((sum,s)=>sum+Number(s.customer_price||0)+Number(s.official_fee||0),0);
     names.textContent=chosen.map(x=>x.name_ar).join('، ');
     totalEl.textContent=money(total);
+    updateReview();
+  };
+
+  const savedPropertySelect=form.querySelector('#savedPropertySelect');
+  if(savedPropertySelect)savedPropertySelect.onchange=()=>{
+    const p=savedProperties.find(x=>x.id===savedPropertySelect.value);
+    if(!p)return;
+    form.elements.governorate.value=p.governorate||'';
+    form.elements.district.value=p.district||'';
+    form.elements.cadastral_area.value=p.cadastral_area||'';
+    form.elements.property_number.value=p.property_number||'';
+    form.elements.property_section.value=p.property_section||'';
     updateReview();
   };
 
