@@ -84,3 +84,12 @@ h3{margin:26px 0 11px;font-size:19px}
   .job{grid-template-columns:1fr auto}.job .primary{grid-column:1/-1}
   .card{padding:16px}.agentbar{align-items:flex-start}.requirement{grid-template-columns:1fr}.reqdone{justify-self:start}
 }
+
+.earningsgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0 20px}
+.earningsgrid>div{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;gap:4px}
+.earningsgrid small{color:var(--muted)}
+.earningsgrid b{font-size:18px}
+.notice{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;gap:4px}
+.notice small{color:var(--muted)}
+.notice.unread{border-color:#111;box-shadow:inset 3px 0 0 #111}
+@media(max-width:620px){.earningsgrid{grid-template-columns:1fr 1fr 1fr}.earningsgrid b{font-size:16px}}
