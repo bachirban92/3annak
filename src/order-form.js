@@ -1,4 +1,4 @@
-export function renderNewOrder({services,bundleItems,serviceRequirements,savedProperties=[],profile,gov,esc,money}){
+export function renderNewOrder({services,bundleItems,serviceRequirements,savedProperties=[],savedAddresses=[],deliveryConfig={},profile,gov,esc,money}){
   const byId=Object.fromEntries(services.map(s=>[s.id,s]));
   const bundleMap={};
   for(const row of bundleItems||[]){
@@ -61,8 +61,30 @@ export function renderNewOrder({services,bundleItems,serviceRequirements,savedPr
         <textarea name="notes" placeholder="ملاحظة (اختياري)"></textarea>
       </section>
 
+      <section class="flowstep orderdetails" id="deliverySection" hidden>
+        <div class="stephead"><span>5</span><div><b>طريقة الاستلام</b><small>اختر نسخة إلكترونية فقط أو توصيل النسخ الورقية.</small></div></div>
+        <div class="delivery-choice">
+          <label class="delivery-option selected">
+            <input type="radio" name="delivery_mode" value="digital" checked>
+            <span><b>نسخة إلكترونية</b><small>تستلم المستندات داخل حسابك</small></span>
+            <strong>بدون توصيل</strong>
+          </label>
+          ${deliveryConfig?.enabled?`<label class="delivery-option">
+            <input type="radio" name="delivery_mode" value="hard_copy">
+            <span><b>نسخة ورقية + إلكترونية</b><small>الوكيل يوصل النسخ الورقية إلى عنوانك</small></span>
+            <strong>+${money(deliveryConfig.customer_fee||0)}</strong>
+          </label>`:''}
+        </div>
+        <div id="deliveryAddressWrap" hidden>
+          ${savedAddresses.length?`<select name="delivery_address_id">
+            <option value="">اختر عنوان التوصيل</option>
+            ${savedAddresses.map(a=>`<option value="${esc(a.id)}" ${a.is_default?'selected':''}>${esc(a.label)} • ${esc(a.address_line1)} • ${esc(a.city)}</option>`).join('')}
+          </select>`:`<div class="empty">أضف عنواناً في حسابك أولاً لاختيار التوصيل الورقي.</div>`}
+        </div>
+      </section>
+
       <section class="flowstep orderreview" id="orderReview" hidden>
-        <div class="stephead"><span>5</span><div><b>راجع الطلب</b><small>تأكد من التفاصيل قبل التأكيد.</small></div></div>
+        <div class="stephead"><span>6</span><div><b>راجع الطلب</b><small>تأكد من التفاصيل قبل التأكيد.</small></div></div>
         <div class="reviewgrid">
           <div><small>الخدمة</small><b id="reviewServices"></b></div>
           <div><small>العقار</small><b id="reviewProperty">—</b></div>
@@ -80,7 +102,7 @@ export function renderNewOrder({services,bundleItems,serviceRequirements,savedPr
   </section>`;
 }
 
-export function bindServiceSelection({services,bundleItems,serviceRequirements,savedProperties=[],money,toast}){
+export function bindServiceSelection({services,bundleItems,serviceRequirements,savedProperties=[],savedAddresses=[],deliveryConfig={},money,toast}){
   const form=document.querySelector('#order');
   if(!form)return;
 
@@ -171,7 +193,9 @@ export function bindServiceSelection({services,bundleItems,serviceRequirements,s
     const property=form.elements.property_number?.value||'';
     const propertyBits=[gov,district,cadastral,property?`عقار ${property}`:''].filter(Boolean);
 
-    const total=chosen.reduce((sum,s)=>sum+Number(s.customer_price||0)+Number(s.official_fee||0),0);
+    const deliveryMode=form.elements.delivery_mode?.value||'digital';
+    const deliveryFee=deliveryMode==='hard_copy'?Number(deliveryConfig.customer_fee||0):0;
+    const total=chosen.reduce((sum,s)=>sum+Number(s.customer_price||0)+Number(s.official_fee||0),0)+deliveryFee;
     reviewServices.textContent=chosen.map(x=>x.name_ar).join('، ');
     reviewProperty.textContent=propertyBits.join(' • ')||'—';
     reviewRequirements.textContent=required.length?`${completed}/${required.length} مكتمل`:'لا يوجد متطلبات إضافية';
@@ -207,7 +231,9 @@ export function bindServiceSelection({services,bundleItems,serviceRequirements,s
     const reqs=selectedRequirements(chosen);
     renderReqs(reqs);
 
-    const total=chosen.reduce((sum,s)=>sum+Number(s.customer_price||0)+Number(s.official_fee||0),0);
+    const deliveryMode=form.elements.delivery_mode?.value||'digital';
+    const deliveryFee=deliveryMode==='hard_copy'?Number(deliveryConfig.customer_fee||0):0;
+    const total=chosen.reduce((sum,s)=>sum+Number(s.customer_price||0)+Number(s.official_fee||0),0)+deliveryFee;
     names.textContent=chosen.map(x=>x.name_ar).join('، ');
     totalEl.textContent=money(total);
     updateReview();
@@ -232,6 +258,13 @@ export function bindServiceSelection({services,bundleItems,serviceRequirements,s
     }
   }
 
+  form.querySelectorAll('input[name="delivery_mode"]').forEach(r=>r.addEventListener('change',()=>{
+    form.querySelectorAll('.delivery-option').forEach(x=>x.classList.toggle('selected',x.querySelector('input')?.checked));
+    const hard=form.elements.delivery_mode?.value==='hard_copy';
+    const wrap=form.querySelector('#deliveryAddressWrap');
+    if(wrap)wrap.hidden=!hard;
+    updateReview();
+  }));
   checks.forEach(x=>x.addEventListener('change',()=>refresh(x)));
   form.addEventListener('input',updateReview);
   form.addEventListener('change',e=>{
@@ -251,6 +284,11 @@ export function bindServiceSelection({services,bundleItems,serviceRequirements,s
     if(missing){
       e.preventDefault();
       toast?.('أكمل المعلومات المطلوبة قبل تأكيد الطلب',true);
+      return;
+    }
+    if(form.elements.delivery_mode?.value==='hard_copy'&&!form.elements.delivery_address_id?.value){
+      e.preventDefault();
+      toast?.('اختر عنوان التوصيل للنسخة الورقية',true);
     }
   });
 }
