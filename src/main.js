@@ -41,9 +41,8 @@ const isAnonymousUser=()=>{
 function shell(body){
   let right='';
   const anonymous=isAnonymousUser();
-  if(profile?.role==='agent') right='';
-  else if(profile?.role==='admin') right=`<button class="toplink withicon" data-go="admin">${icon('settings')}<span>الإدارة</span></button>`;
-  else if(!anonymous&&profile?.role==='customer') right=`<button class="toplink withicon" data-go="customer">${icon('orders')}<span>حسابي</span></button>`;
+  if(profile?.role==='admin') right=`<button class="toplink withicon" data-go="admin">${icon('settings')}<span>الإدارة</span></button>`;
+  else if(!anonymous&&['customer','agent'].includes(profile?.role)) right=`<button class="toplink withicon" data-go="account">${icon('orders')}<span>حسابي</span></button>`;
   return `<header><button class="brand" data-go="home">عنّك</button>${right}</header><main>${body}</main>`;
 }
 async function load(){
@@ -94,6 +93,7 @@ function customerLogin(){
       <input name="password" type="password" autocomplete="current-password" required placeholder="كلمة المرور">
       <button class="primary full">دخول</button>
     </form>
+    <button class="ghost full" data-go="forgot-password">نسيت كلمة المرور؟</button>
   </section>`);
   bind();
 }
@@ -135,7 +135,7 @@ async function customerPortal(){
         <small>مرحباً</small>
         <h2>${esc(profile?.full_name||session?.user?.email||'')}</h2>
       </div>
-      <button class="ghost" data-customer-logout>خروج</button>
+      <button class="ghost" data-customer-logout>تسجيل الخروج</button>
     </div>
 
     <div class="customermetrics">
@@ -176,6 +176,83 @@ async function customerPortal(){
     .on('postgres_changes',{event:'*',schema:'public',table:'orders',filter:`customer_id=eq.${session.user.id}`},()=>customerPortal())
     .on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:`user_id=eq.${session.user.id}`},()=>customerPortal())
     .subscribe();
+}
+
+async function accountPage(){
+  clearLive();
+  if(isAnonymousUser())return go('home');
+
+  const isAgent=profile?.role==='agent';
+  const agent=isAgent
+    ?(await supabase.from('agent_profiles').select('verification_status,completed_orders,rating,available').eq('user_id',session.user.id).maybeSingle()).data
+    :null;
+  const coverage=isAgent
+    ?(await supabase.from('agent_coverage').select('governorate,district').eq('agent_id',session.user.id).eq('active',true)).data||[]
+    :[];
+
+  const roleLabel=isAgent?'وكيل':profile?.role==='customer'?'عميل':'إدارة';
+  app.innerHTML=shell(`<section class="accountpage">
+    <div class="title">
+      <div><h2>حسابي</h2><small>${roleLabel}</small></div>
+      <button data-go="home">رجوع</button>
+    </div>
+
+    <section class="card">
+      <h3>معلومات الحساب</h3>
+      <form id="accountProfileForm">
+        <label>الاسم<input name="name" required value="${esc(profile?.full_name||'')}"></label>
+        <label>رقم الهاتف<input name="phone" value="${esc(profile?.phone||'')}"></label>
+        <label>البريد الإلكتروني<input value="${esc(session?.user?.email||profile?.email||'')}" disabled></label>
+        <button class="primary full">حفظ المعلومات</button>
+      </form>
+    </section>
+
+    ${isAgent?`<section class="card">
+      <h3>حساب الوكيل</h3>
+      <div class="accountfacts">
+        <div><small>حالة الحساب</small><b>${agent?.verification_status==='approved'?'معتمد':agent?.verification_status==='pending'?'قيد المراجعة':agent?.verification_status==='suspended'?'موقوف':'غير معتمد'}</b></div>
+        <div><small>طلبات مكتملة</small><b>${agent?.completed_orders||0}</b></div>
+        <div><small>مناطق العمل</small><b>${coverage.length||0}</b></div>
+      </div>
+      <small class="accountmuted">${coverage.map(x=>esc(x.governorate)+(x.district?' / '+esc(x.district):'')).join('، ')||'لا توجد مناطق عمل.'}</small>
+    </section>`:''}
+
+    <section class="card">
+      <h3>تغيير كلمة المرور</h3>
+      <form id="accountPasswordForm">
+        <input name="password" type="password" minlength="8" autocomplete="new-password" required placeholder="كلمة المرور الجديدة">
+        <input name="confirm" type="password" minlength="8" autocomplete="new-password" required placeholder="تأكيد كلمة المرور">
+        <button class="secondary full">تغيير كلمة المرور</button>
+      </form>
+    </section>
+
+    <button class="secondary full account-signout" data-account-logout>تسجيل الخروج</button>
+  </section>`);
+  bind();
+}
+
+function forgotPasswordPage(){
+  if(!isAnonymousUser())return go('account');
+  app.innerHTML=shell(`<section class="card narrow">
+    <div class="title"><h2>استعادة كلمة المرور</h2><button data-go="home">رجوع</button></div>
+    <form id="forgotPasswordForm">
+      <input name="email" type="email" autocomplete="email" required placeholder="البريد الإلكتروني">
+      <button class="primary full">إرسال رابط الاستعادة</button>
+    </form>
+  </section>`);
+  bind();
+}
+
+function resetPasswordPage(){
+  app.innerHTML=shell(`<section class="card narrow">
+    <h2>كلمة مرور جديدة</h2>
+    <form id="resetPasswordForm">
+      <input name="password" type="password" minlength="8" autocomplete="new-password" required placeholder="كلمة المرور الجديدة">
+      <input name="confirm" type="password" minlength="8" autocomplete="new-password" required placeholder="تأكيد كلمة المرور">
+      <button class="primary full">حفظ كلمة المرور</button>
+    </form>
+  </section>`);
+  bind();
 }
 
 function newOrder(){
@@ -291,6 +368,7 @@ function agentLogin(){
       <input name="password" type="password" autocomplete="current-password" required placeholder="كلمة المرور">
       <button class="primary full">دخول</button>
     </form>
+    <button class="ghost full" data-go="forgot-password">نسيت كلمة المرور؟</button>
   </section>`);
   bind();
 }
@@ -320,7 +398,7 @@ async function agentPortal(){
       <h2>أنت داخل كعميل</h2>
       <p>اخرج من حساب العميل أولاً إذا بدك تدخل أو تسجل كوكيل.</p>
       <button class="primary full" data-go="customer">لوحة العميل</button>
-      <button class="secondary full" data-customer-logout>خروج</button>
+      <button class="secondary full" data-customer-logout>تسجيل الخروج</button>
     </section>`);
     return bind();
   }
@@ -330,7 +408,7 @@ async function agentPortal(){
 
   if(!a){
     app.innerHTML=shell(`<section class="card narrow">
-      <div class="title"><h2>إكمال طلب الوكيل</h2><button data-agent-logout>خروج</button></div>
+      <div class="title"><h2>إكمال طلب الوكيل</h2><button data-agent-logout>تسجيل الخروج</button></div>
       <form id="agentJoin">
         <input name="name" value="${esc(profile?.full_name)}" required placeholder="الاسم">
         <input name="email" type="email" value="${esc(profile?.email||session.user?.email)}" required placeholder="البريد الإلكتروني">
@@ -352,7 +430,7 @@ async function agentPortal(){
     const complete=(reqs||[]).filter(r=>r.required).every(r=>byReq[r.id]?.status==='approved');
 
     app.innerHTML=shell(`<section class="card narrow pending">
-      <div class="title"><h2>طلب الوكيل</h2><button data-agent-logout>خروج</button></div>
+      <div class="title"><h2>طلب الوكيل</h2><button data-agent-logout>تسجيل الخروج</button></div>
       <div class="statusbig">${complete?'جاهز للمراجعة':'أكمل التحقق'}</div>
       <p>${complete?'تم اعتماد مستنداتك. بانتظار تفعيل الحساب.':'ارفع المستندات المطلوبة ليتمكن المسؤول من اعتماد حسابك.'}</p>
 
@@ -390,7 +468,7 @@ async function agentPortal(){
       <div class="balancebox">${icon('wallet')}<span><small>الرصيد المتاح</small><strong>${money(bal.available)}</strong></span></div>
       <div class="agentbar-actions">
         <label class="availability"><input id="agentAvailable" type="checkbox" ${a.available?'checked':''}><span>${a.available?'متاح':'غير متاح'}</span></label>
-        <button class="ghost" data-agent-logout>خروج</button>
+        <button class="ghost" data-agent-logout>تسجيل الخروج</button>
       </div>
     </div>
     <div class="earningsgrid">
@@ -762,6 +840,10 @@ function render(){
   const r=location.hash.slice(1)||'home';
   const anonymous=isAnonymousUser();
 
+  if(new URLSearchParams(location.search).get('password-reset')==='1'&&!anonymous){
+    return resetPasswordPage();
+  }
+
   // Home is the public role chooser only when signed out.
   // Signed-in users always land on their own dashboard.
   if(r==='home'){
@@ -771,6 +853,13 @@ function render(){
     if(profile?.role==='admin')return admin();
     app.innerHTML=home();return bind();
   }
+
+  if(r==='account'){
+    if(anonymous)return go('home');
+    return accountPage();
+  }
+
+  if(r==='forgot-password')return forgotPasswordPage();
 
   if(r==='customer'){
     if(anonymous)return customerAuthChoice();
@@ -919,10 +1008,92 @@ function bind(){
   };
 
   document.querySelectorAll('[data-customer-logout]').forEach(x=>x.onclick=async()=>{
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({scope:'local'});
     session=null;profile=null;
     await load();
     go('home');
+  });
+
+  const accountProfileForm=document.querySelector('#accountProfileForm');
+  if(accountProfileForm)accountProfileForm.onsubmit=async e=>{
+    e.preventDefault();
+    const f=new FormData(accountProfileForm),b=accountProfileForm.querySelector('button');
+    busy(b,true,'جارٍ الحفظ...');
+    const {data,error}=await supabase.rpc('update_my_profile',{
+      p_full_name:String(f.get('name')||'').trim(),
+      p_phone:String(f.get('phone')||'').trim(),
+      p_locale:'ar',
+      p_email:session?.user?.email||profile?.email||''
+    });
+    busy(b,false);
+    if(error)return toast(error.message,true);
+    profile=data;
+    toast('تم حفظ معلومات الحساب');
+    accountPage();
+  };
+
+  const accountPasswordForm=document.querySelector('#accountPasswordForm');
+  if(accountPasswordForm)accountPasswordForm.onsubmit=async e=>{
+    e.preventDefault();
+    const f=new FormData(accountPasswordForm),b=accountPasswordForm.querySelector('button');
+    const password=String(f.get('password')||''),confirm=String(f.get('confirm')||'');
+    if(password!==confirm)return toast('كلمتا المرور غير متطابقتين',true);
+    busy(b,true,'جارٍ التغيير...');
+    const {error}=await supabase.auth.updateUser({password});
+    busy(b,false);
+    error?toast(error.message,true):toast('تم تغيير كلمة المرور');
+    if(!error)accountPasswordForm.reset();
+  };
+
+  document.querySelectorAll('[data-account-logout]').forEach(x=>x.onclick=async()=>{
+    busy(x,true,'جارٍ تسجيل الخروج...');
+    await supabase.auth.signOut({scope:'local'});
+    session=null;profile=null;
+    history.replaceState(null,'',location.pathname);
+    await load();
+    go('home');
+  });
+
+  const forgotPasswordForm=document.querySelector('#forgotPasswordForm');
+  if(forgotPasswordForm)forgotPasswordForm.onsubmit=async e=>{
+    e.preventDefault();
+    const f=new FormData(forgotPasswordForm),b=forgotPasswordForm.querySelector('button');
+    busy(b,true,'جارٍ الإرسال...');
+    const {error}=await supabase.auth.resetPasswordForEmail(
+      String(f.get('email')||'').trim(),
+      {redirectTo:'https://bachirban92.github.io/3annak/?password-reset=1'}
+    );
+    busy(b,false);
+    if(error)return toast(error.message,true);
+    app.innerHTML=shell('<section class="card narrow pending"><h2>تحقق من بريدك</h2><p>إذا كان الحساب موجوداً، أرسلنا رابطاً لتعيين كلمة مرور جديدة.</p><button class="primary full" data-go="home">رجوع</button></section>');
+    bind();
+  };
+
+  const resetPasswordForm=document.querySelector('#resetPasswordForm');
+  if(resetPasswordForm)resetPasswordForm.onsubmit=async e=>{
+    e.preventDefault();
+    const f=new FormData(resetPasswordForm),b=resetPasswordForm.querySelector('button');
+    const password=String(f.get('password')||''),confirm=String(f.get('confirm')||'');
+    if(password!==confirm)return toast('كلمتا المرور غير متطابقتين',true);
+    busy(b,true,'جارٍ الحفظ...');
+    const {error}=await supabase.auth.updateUser({password});
+    busy(b,false);
+    if(error)return toast(error.message,true);
+    history.replaceState(null,'',location.pathname);
+    toast('تم تغيير كلمة المرور');
+    await load();
+    go('home');
+  };
+
+  document.querySelectorAll('[data-resend-agent-confirm]').forEach(x=>x.onclick=async()=>{
+    busy(x,true,'جارٍ الإرسال...');
+    const {error}=await supabase.auth.resend({
+      type:'signup',
+      email:x.dataset.resendAgentConfirm,
+      options:{emailRedirectTo:'https://bachirban92.github.io/3annak/#agent'}
+    });
+    busy(x,false);
+    error?toast(error.message,true):toast('تم إرسال رسالة التفعيل من جديد');
   });
 
   const agentLoginForm=document.querySelector('#agentLogin');
@@ -935,11 +1106,25 @@ function bind(){
       email:String(f.get('email')||'').trim(),
       password:String(f.get('password')||'')
     });
-    if(error){busy(b,false);return toast('البريد أو كلمة المرور غير صحيحة.',true)}
+    if(error){
+      busy(b,false);
+      if(error.code==='email_not_confirmed'||/email not confirmed/i.test(error.message||'')){
+        const email=String(f.get('email')||'').trim();
+        app.innerHTML=shell(`<section class="card narrow pending">
+          <h2>فعّل بريدك أولاً</h2>
+          <p>أرسلنا رسالة تأكيد إلى <b>${esc(email)}</b>. فعّل الحساب ثم ارجع وسجّل الدخول.</p>
+          <button class="secondary full" data-resend-agent-confirm="${esc(email)}">إعادة إرسال رسالة التفعيل</button>
+          <button class="primary full" data-go="agent-login">رجوع للدخول</button>
+        </section>`);
+        bind();
+        return;
+      }
+      return toast('البريد أو كلمة المرور غير صحيحة.',true)
+    }
     session=data.session;
     await load();
     toast('تم تسجيل الدخول');
-    agentPortal();
+    go('home');
   };
 
   const agentRegisterForm=document.querySelector('#agentRegister');
@@ -954,7 +1139,10 @@ function bind(){
     const {data,error}=await supabase.auth.signUp({
       email,
       password,
-      options:{data:{full_name:String(f.get('name')||''),phone:String(f.get('phone')||'')}}
+      options:{
+        data:{full_name:String(f.get('name')||''),phone:String(f.get('phone')||'')},
+        emailRedirectTo:'https://bachirban92.github.io/3annak/#agent'
+      }
     });
     if(error){busy(b,false);return toast(error.message,true)}
 
@@ -988,7 +1176,7 @@ function bind(){
   };
 
   document.querySelectorAll('[data-agent-logout]').forEach(x=>x.onclick=async()=>{
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({scope:'local'});
     session=null;profile=null;
     await load();
     go('home');
