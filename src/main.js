@@ -1107,6 +1107,17 @@ async function admin(section='overview'){
 
   if(section==='services'){
     body=`<section class="adminpanel">
+      <div class="adminsectionhead"><h3>توصيل النسخ الورقية</h3><small>إعدادات عامة</small></div>
+      <form id="deliveryConfigForm" class="inline-editor">
+        <label class="checkline"><input type="checkbox" name="enabled" ${deliveryConfig?.enabled?'checked':''}> تفعيل التوصيل الورقي</label>
+        <div class="grid">
+          <label>رسوم العميل<input name="customer_fee" type="number" min="0" step="0.01" value="${Number(deliveryConfig?.customer_fee||0)}"></label>
+          <label>بدل الوكيل<input name="agent_payout" type="number" min="0" step="0.01" value="${Number(deliveryConfig?.agent_payout||0)}"></label>
+        </div>
+        <button class="primary">حفظ إعدادات التوصيل</button>
+      </form>
+    </section>
+    <section class="adminpanel">
       <div class="adminsectionhead"><h3>الخدمات</h3><small>التسعير والمتطلبات ومراحل التنفيذ</small></div>
       <div class="stack">${renderServicesAdmin(srv||[],reqs||[],workflow||[],bundles||[])}</div>
     </section>`;
@@ -1635,6 +1646,23 @@ function bind(){
     busy(x,false);
     error?toast(error.message,true):notificationsPage();
   });
+
+  const deliveryConfigForm=document.querySelector('#deliveryConfigForm');
+  if(deliveryConfigForm)deliveryConfigForm.onsubmit=async e=>{
+    e.preventDefault();
+    const fd=new FormData(deliveryConfigForm),b=deliveryConfigForm.querySelector('button');
+    busy(b,true,'جارٍ الحفظ...');
+    const {error}=await supabase.rpc('admin_update_hard_copy_delivery',{
+      p_enabled:fd.get('enabled')==='on',
+      p_customer_fee:Number(fd.get('customer_fee')||0),
+      p_agent_payout:Number(fd.get('agent_payout')||0)
+    });
+    busy(b,false);
+    if(error)return toast(error.message,true);
+    toast('تم حفظ إعدادات التوصيل');
+    await load();
+    admin('services');
+  };
 
   const accountProfileForm=document.querySelector('#accountProfileForm');
   if(accountProfileForm)accountProfileForm.onsubmit=async e=>{
