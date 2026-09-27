@@ -33,7 +33,10 @@ function toast(msg,bad=false){
 function clearLive(){if(liveChannel){supabase.removeChannel(liveChannel);liveChannel=null}}
 function shell(body){
   let right='';
-  const anonymous=session?.user?.is_anonymous===true;
+  const u=session?.user;
+  const anonymous=u?.is_anonymous===true
+    || u?.app_metadata?.provider==='anonymous'
+    || (!u?.email&&!u?.phone&&(!u?.identities||u.identities.length===0));
   if(profile?.role==='agent') right='';
   else if(profile?.role==='admin') right=`<button class="toplink withicon" data-go="admin">${icon('settings')}<span>الإدارة</span></button>`;
   else if(!anonymous) right=`<button class="toplink withicon" data-go="orders">${icon('orders')}<span>طلباتي</span></button>`;
