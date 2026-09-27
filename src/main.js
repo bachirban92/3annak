@@ -132,16 +132,57 @@ async function customerDetail(id){
     .on('postgres_changes',{event:'UPDATE',schema:'public',table:'orders',filter:`id=eq.${id}`},()=>customerDetail(id))
     .subscribe();
 }
+function agentAuthChoice(){
+  app.innerHTML=shell(`<section class="card narrow agentauth">
+    <div class="title"><h2>بوابة الوكيل</h2><button data-go="home">رجوع</button></div>
+    <button class="primary full" data-go="agent-login">دخول وكيل</button>
+    <button class="secondary full" data-go="agent-register">تسجيل وكيل جديد</button>
+  </section>`);
+  bind();
+}
+
+function agentLogin(){
+  app.innerHTML=shell(`<section class="card narrow">
+    <div class="title"><h2>دخول الوكيل</h2><button data-go="agent">رجوع</button></div>
+    <form id="agentLogin">
+      <input name="email" type="email" autocomplete="username" required placeholder="البريد الإلكتروني">
+      <input name="password" type="password" autocomplete="current-password" required placeholder="كلمة المرور">
+      <button class="primary full">دخول</button>
+    </form>
+  </section>`);
+  bind();
+}
+
+function agentRegister(){
+  app.innerHTML=shell(`<section class="card narrow">
+    <div class="title"><h2>تسجيل وكيل جديد</h2><button data-go="agent">رجوع</button></div>
+    <form id="agentRegister">
+      <input name="name" required placeholder="الاسم">
+      <input name="email" type="email" autocomplete="username" required placeholder="البريد الإلكتروني">
+      <input name="phone" required placeholder="رقم الهاتف">
+      <input name="password" type="password" minlength="8" autocomplete="new-password" required placeholder="كلمة المرور">
+      <select name="governorate" required><option value="">المحافظة</option>${gov.map(x=>`<option>${x}</option>`).join('')}</select>
+      <input name="district" placeholder="القضاء (اختياري)">
+      <button class="primary full">إنشاء الحساب</button>
+    </form>
+  </section>`);
+  bind();
+}
+
 async function agentPortal(){
   clearLive();
   const {data:a}=await supabase.from('agent_profiles').select('*').eq('user_id',session.user.id).maybeSingle();
 
+  if(!a && session.user?.is_anonymous){
+    return agentAuthChoice();
+  }
+
   if(!a){
     app.innerHTML=shell(`<section class="card narrow">
-      <div class="title"><h2>التسجيل كوكيل</h2><button data-go="home">رجوع</button></div>
+      <div class="title"><h2>إكمال طلب الوكيل</h2><button data-agent-logout>خروج</button></div>
       <form id="agentJoin">
         <input name="name" value="${esc(profile?.full_name)}" required placeholder="الاسم">
-        <input name="email" type="email" value="${esc(profile?.email)}" required placeholder="البريد الإلكتروني">
+        <input name="email" type="email" value="${esc(profile?.email||session.user?.email)}" required placeholder="البريد الإلكتروني">
         <input name="phone" value="${esc(profile?.phone)}" required placeholder="رقم الهاتف">
         <select name="governorate" required><option value="">منطقة العمل</option>${gov.map(x=>`<option>${x}</option>`).join('')}</select>
         <input name="district" placeholder="القضاء (اختياري)">
@@ -153,7 +194,7 @@ async function agentPortal(){
 
   if(a.verification_status!=='approved'){
     app.innerHTML=shell(`<section class="card narrow pending">
-      <h2>طلب الوكيل</h2>
+      <div class="title"><h2>طلب الوكيل</h2><button data-agent-logout>خروج</button></div>
       <div class="statusbig">قيد المراجعة</div>
       <p>سنفعّل حسابك بعد الاعتماد.</p>
     </section>`);
@@ -174,7 +215,10 @@ async function agentPortal(){
   app.innerHTML=shell(`<section>
     <div class="agentbar">
       <div class="balancebox">${icon('wallet')}<span><small>الرصيد المتاح</small><strong>${money(bal.available)}</strong></span></div>
-      <label class="availability"><input id="agentAvailable" type="checkbox" ${a.available?'checked':''}><span>${a.available?'متاح':'غير متاح'}</span></label>
+      <div class="agentbar-actions">
+        <label class="availability"><input id="agentAvailable" type="checkbox" ${a.available?'checked':''}><span>${a.available?'متاح':'غير متاح'}</span></label>
+        <button class="ghost" data-agent-logout>خروج</button>
+      </div>
     </div>
     <div class="earningsgrid">
       <div><small>قيد التنفيذ</small><b>${money(bal.pending)}</b></div>
@@ -375,6 +419,8 @@ function render(){
   if(r==='new')app.innerHTML=newOrder();
   else if(r==='orders')return orders();
   else if(r==='agent')return agentPortal();
+  else if(r==='agent-login'){app.innerHTML='';return agentLogin();}
+  else if(r==='agent-register'){app.innerHTML='';return agentRegister();}
   else if(r==='staff')return staffAccess();
   else if(r==='admin')return admin();
   else if(r.startsWith('admin-order/'))return adminOrder(r.split('/')[1]);
@@ -383,6 +429,75 @@ function render(){
 }
 function bind(){
   document.querySelectorAll('[data-go]').forEach(x=>x.onclick=()=>go(x.dataset.go));
+
+  const agentLoginForm=document.querySelector('#agentLogin');
+  if(agentLoginForm)agentLoginForm.onsubmit=async e=>{
+    e.preventDefault();
+    const f=new FormData(agentLoginForm),b=agentLoginForm.querySelector('button');
+    busy(b,true,'جارٍ الدخول...');
+    await supabase.auth.signOut();
+    const {data,error}=await supabase.auth.signInWithPassword({
+      email:String(f.get('email')||'').trim(),
+      password:String(f.get('password')||'')
+    });
+    if(error){busy(b,false);return toast('البريد أو كلمة المرور غير صحيحة.',true)}
+    session=data.session;
+    await load();
+    toast('تم تسجيل الدخول');
+    agentPortal();
+  };
+
+  const agentRegisterForm=document.querySelector('#agentRegister');
+  if(agentRegisterForm)agentRegisterForm.onsubmit=async e=>{
+    e.preventDefault();
+    const f=new FormData(agentRegisterForm),b=agentRegisterForm.querySelector('button');
+    const email=String(f.get('email')||'').trim();
+    const password=String(f.get('password')||'');
+    busy(b,true,'جارٍ إنشاء الحساب...');
+    await supabase.auth.signOut();
+
+    const {data,error}=await supabase.auth.signUp({
+      email,
+      password,
+      options:{data:{full_name:String(f.get('name')||''),phone:String(f.get('phone')||'')}}
+    });
+    if(error){busy(b,false);return toast(error.message,true)}
+
+    if(!data.session){
+      busy(b,false);
+      app.innerHTML=shell('<section class="card narrow pending"><h2>تم إنشاء الحساب</h2><p>افتح بريدك لتأكيد الحساب، ثم ارجع إلى دخول الوكيل.</p><button class="primary full" data-go="agent-login">دخول الوكيل</button></section>');
+      return bind();
+    }
+
+    session=data.session;
+    await load();
+    const contact=await supabase.rpc('update_my_profile',{
+      p_full_name:f.get('name'),
+      p_phone:f.get('phone'),
+      p_locale:'ar',
+      p_email:email
+    });
+    if(contact.error){busy(b,false);return toast(contact.error.message,true)}
+    profile=contact.data;
+    const applied=await supabase.rpc('apply_as_agent');
+    if(applied.error){busy(b,false);return toast(applied.error.message,true)}
+    const coverage=await supabase.rpc('replace_agent_coverage',{
+      p_governorate:f.get('governorate'),
+      p_district:f.get('district')||''
+    });
+    busy(b,false);
+    if(coverage.error)return toast(coverage.error.message,true);
+    await load();
+    toast('تم إرسال طلب الوكيل');
+    agentPortal();
+  };
+
+  document.querySelectorAll('[data-agent-logout]').forEach(x=>x.onclick=async()=>{
+    await supabase.auth.signOut();
+    session=null;profile=null;
+    await load();
+    go('home');
+  });
 
   const staffLogin=document.querySelector('#staffLogin');
   if(staffLogin)staffLogin.onsubmit=async e=>{
