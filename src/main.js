@@ -5,7 +5,7 @@ import { renderServicesAdmin, bindServicesAdmin } from './service-admin.js';
 import { renderNewOrder, bindServiceSelection } from './order-form.js';
 
 const app=document.querySelector('#app');
-let session=null,profile=null,services=[],bundleItems=[],serviceRequirements=[],paymentsEnabled=false,liveChannel=null;
+let session=null,profile=null,services=[],bundleItems=[],serviceRequirements=[],customerProperties=[],paymentsEnabled=false,liveChannel=null;
 let passwordRecoveryMode=location.hash.includes('type=recovery')||new URLSearchParams(location.search).get('password-reset')==='1';
 
 const labels={
@@ -54,14 +54,15 @@ async function load(){
     if(error){console.error(error);return}
     session=data.session;
   }
-  const [{data:p},{data:srv},{data:bundles},{data:reqCatalog},{data:paymentSetting}]=await Promise.all([
+  const [{data:p},{data:srv},{data:bundles},{data:reqCatalog},{data:savedProps},{data:paymentSetting}]=await Promise.all([
     supabase.from('profiles').select('*').eq('id',session.user.id).maybeSingle(),
     supabase.from('services').select('*').eq('active',true).order('sort_order'),
     supabase.from('service_bundle_items').select('*').order('sort_order'),
     supabase.from('service_requirements').select('*').eq('active',true).order('sort_order'),
+    supabase.from('customer_properties').select('*').order('is_default',{ascending:false}).order('created_at',{ascending:false}),
     supabase.from('app_settings').select('value').eq('key','payments_enforced').maybeSingle()
   ]);
-  profile=p;services=srv||[];bundleItems=bundles||[];serviceRequirements=reqCatalog||[];
+  profile=p;services=srv||[];bundleItems=bundles||[];serviceRequirements=reqCatalog||[];customerProperties=savedProps||[];
   paymentsEnabled=paymentSetting?.value?.enabled===true;
 }
 function home(){
@@ -252,7 +253,7 @@ function resetPasswordPage(){
 function newOrder(){
   if(isAnonymousUser())return customerAuthChoice();
   if(profile?.role!=='customer')return profile?.role==='agent'?agentPortal():go('admin');
-  return shell(renderNewOrder({services,bundleItems,serviceRequirements,profile,gov,esc,money}));
+  return shell(renderNewOrder({services,bundleItems,serviceRequirements,savedProperties:customerProperties,profile,gov,esc,money}));
 }
 async function orders(){
   clearLive();
@@ -1399,7 +1400,7 @@ function bind(){
     customerDetail(supportForm.dataset.orderId);
   };
 
-  bindServiceSelection({services,bundleItems,serviceRequirements,money,toast});
+  bindServiceSelection({services,bundleItems,serviceRequirements,savedProperties:customerProperties,money,toast});
   const order=document.querySelector('#order');
   if(order)order.onsubmit=async e=>{
     e.preventDefault();
