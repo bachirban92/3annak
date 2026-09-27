@@ -320,7 +320,7 @@ async function customerDetail(id){
         ${finalDocs.map(x=>`<div class="document-row">
           <div><b>${esc(x.original_name||'مستند')}</b><small>${esc(x.mime_type||'')}</small></div>
           <div class="document-actions">
-            <button class="secondary compact" data-file-view="${esc(x.storage_path)}">عرض</button>
+            <button class="secondary compact" data-file-view="${esc(x.storage_path)}" data-file-name="${esc(x.original_name||'مستند')}" data-file-mime="${esc(x.mime_type||'')}">عرض</button>
             <button class="secondary compact" data-file-download="${esc(x.storage_path)}">تنزيل</button>
           </div>
         </div>`).join('')}
@@ -616,7 +616,7 @@ async function agentJob(id){
           const d=r.document_id?docById[r.document_id]:null;
           return `<div class="requirement done">
             <div><b>${esc(r.label_ar)}</b><small>${r.value_text?esc(r.value_text):(d?esc(d.original_name||'مرفق'):(r.required?'مطلوب':'لم يقدّم'))}</small></div>
-            ${d?`<button class="secondary compact" data-file-view="${esc(d.storage_path)}">عرض</button>`:'<span class="reqdone">✓</span>'}
+            ${d?`<button class="secondary compact" data-file-view="${esc(d.storage_path)}" data-file-name="${esc(d.original_name||'مستند')}" data-file-mime="${esc(d.mime_type||'')}">عرض</button>`:'<span class="reqdone">✓</span>'}
           </div>`;
         }).join('')}
       </div>`:''}
@@ -627,7 +627,7 @@ async function agentJob(id){
           return `<div class="deliveryitem ${d?'done':''}">
             <div class="deliverylabel"><span class="deliverystatus">${d?'✓':'○'}</span><span><b>${esc(x.service_name_ar)}</b><small>${d?'تم رفع المستند النهائي':'بانتظار المستند النهائي'}</small></span></div>
             <div class="deliveryactions">
-              ${d?`<button class="secondary compact" data-file-view="${esc(d.storage_path)}">عرض</button>`:''}
+              ${d?`<button class="secondary compact" data-file-view="${esc(d.storage_path)}" data-file-name="${esc(d.original_name||'مستند')}" data-file-mime="${esc(d.mime_type||'')}">عرض</button>`:''}
               <input id="deliverable-file-${x.id}" type="file" accept=".pdf,image/jpeg,image/png,image/webp">
               <button class="secondary compact" data-deliverable-upload="${x.id}" data-order-id="${o.id}" data-old-path="${esc(d?.storage_path||'')}">${d?'استبدال':'رفع'}</button>
             </div>
@@ -1568,34 +1568,24 @@ function bind(){
   });
 
   document.querySelectorAll('[data-agent-doc-view]').forEach(x=>x.onclick=async()=>{
-    const {data,error}=await supabase.storage.from('agent-files').download(x.dataset.agentDocView);
+    busy(x,true,'جارٍ الفتح...');
+    const {data,error}=await supabase.storage.from('agent-files').createSignedUrl(x.dataset.agentDocView,300);
+    busy(x,false);
     if(error)return toast(error.message,true);
-    const u=URL.createObjectURL(data);
-    window.open(u,'_blank');
-    setTimeout(()=>URL.revokeObjectURL(u),60000);
-  });
 
-  document.querySelectorAll('[data-create-payout]').forEach(x=>x.onclick=async()=>{
-    busy(x,true);
-    const {error}=await supabase.rpc('create_payout_batch',{p_agent_id:x.dataset.createPayout,p_currency:'USD'});
-    busy(x,false);
-    error?toast(error.message==='no_available_balance'?'لا يوجد رصيد متاح للدفع':error.message,true):(toast('تم إنشاء الدفعة'),adminAgent(x.dataset.createPayout));
-  });
-
-  document.querySelectorAll('[data-pay-payout]').forEach(x=>x.onclick=async()=>{
-    const reference=prompt('مرجع التحويل (اختياري)')||'';
-    busy(x,true);
-    const {error}=await supabase.rpc('admin_mark_payout_paid',{p_payout_id:x.dataset.payPayout,p_provider:'manual',p_reference:reference});
-    busy(x,false);
-    error?toast(error.message,true):(toast('تم تسجيل الدفعة كمدفوعة'),adminAgent(x.dataset.agentId));
-  });
-
-  document.querySelectorAll('[data-cancel-payout]').forEach(x=>x.onclick=async()=>{
-    if(!confirm('إلغاء هذه الدفعة؟'))return;
-    busy(x,true);
-    const {error}=await supabase.rpc('admin_cancel_payout',{p_payout_id:x.dataset.cancelPayout});
-    busy(x,false);
-    error?toast(error.message,true):(toast('تم إلغاء الدفعة'),adminAgent(x.dataset.agentId));
+    document.querySelector('#fileViewer')?.remove();
+    const viewer=document.createElement('div');
+    viewer.id='fileViewer';
+    viewer.className='file-viewer';
+    viewer.innerHTML=`
+      <div class="file-viewer-card">
+        <div class="file-viewer-head"><b>المستند</b><button type="button" class="secondary compact" data-close-file-viewer>إغلاق</button></div>
+        <div class="file-viewer-body"><iframe src="${data.signedUrl}" title="المستند"></iframe></div>
+      </div>`;
+    document.body.appendChild(viewer);
+    const close=()=>viewer.remove();
+    viewer.querySelector('[data-close-file-viewer]').onclick=close;
+    viewer.onclick=e=>{if(e.target===viewer)close()};
   });
 
   document.querySelectorAll('[data-agent-doc-review]').forEach(x=>x.onclick=async()=>{
@@ -1692,7 +1682,46 @@ function bind(){
     const {data,error}=await supabase.storage.from('order-files').createSignedUrl(x.dataset.fileView,300);
     busy(x,false);
     if(error)return toast(error.message,true);
-    window.location.href=data.signedUrl;
+
+    const name=x.dataset.fileName||'مستند';
+    const mime=x.dataset.fileMime||'';
+    const url=data.signedUrl;
+    const isImage=mime.startsWith('image/')||/\.(png|jpe?g|webp|gif)$/i.test(name);
+    const isPdf=mime==='application/pdf'||/\.pdf$/i.test(name);
+
+    document.querySelector('#fileViewer')?.remove();
+    const viewer=document.createElement('div');
+    viewer.id='fileViewer';
+    viewer.className='file-viewer';
+    viewer.innerHTML=`
+      <div class="file-viewer-card">
+        <div class="file-viewer-head">
+          <b>${esc(name)}</b>
+          <button type="button" class="secondary compact" data-close-file-viewer>إغلاق</button>
+        </div>
+        <div class="file-viewer-body">
+          ${isImage
+            ?`<img src="${url}" alt="${esc(name)}">`
+            :isPdf
+              ?`<iframe src="${url}" title="${esc(name)}"></iframe>`
+              :`<div class="empty">لا يمكن عرض هذا النوع داخل الصفحة.</div>`}
+        </div>
+        <div class="file-viewer-actions">
+          <button type="button" class="secondary full" data-viewer-download>تنزيل</button>
+        </div>
+      </div>`;
+    document.body.appendChild(viewer);
+
+    const close=()=>viewer.remove();
+    viewer.querySelector('[data-close-file-viewer]').onclick=close;
+    viewer.onclick=e=>{if(e.target===viewer)close()};
+    viewer.querySelector('[data-viewer-download]').onclick=async()=>{
+      const {data:downloadData,error:downloadError}=await supabase.storage
+        .from('order-files')
+        .createSignedUrl(x.dataset.fileView,300,{download:true});
+      if(downloadError)return toast(downloadError.message,true);
+      window.location.href=downloadData.signedUrl;
+    };
   });
 
   document.querySelectorAll('[data-file-download]').forEach(x=>x.onclick=async()=>{
