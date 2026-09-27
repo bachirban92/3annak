@@ -1,5 +1,6 @@
 import { supabase } from './supabase.js';
 import { icon } from './icons.js';
+import { renderRequirements, bindRequirementActions } from './requirements.js';
 
 const app=document.querySelector('#app');
 let session=null,profile=null,services=[],liveChannel=null;
@@ -101,11 +102,12 @@ async function orders(){
 }
 async function customerDetail(id){
   clearLive();
-  const [{data:o,error},{data:e},{data:d},{data:i}]=await Promise.all([
+  const [{data:o,error},{data:e},{data:d},{data:i},{data:reqs}]=await Promise.all([
     supabase.from('orders').select('*').eq('id',id).single(),
     supabase.from('order_events').select('*').eq('order_id',id).order('created_at'),
     supabase.from('documents').select('*').eq('order_id',id).eq('visible_to_customer',true).order('created_at'),
-    supabase.from('order_items').select('*').eq('order_id',id)
+    supabase.from('order_items').select('*').eq('order_id',id),
+    supabase.from('order_requirements').select('*').eq('order_id',id).order('created_at')
   ]);
   if(error)return toast(error.message,true);
   app.innerHTML=shell(`<section class="card">
@@ -115,12 +117,15 @@ async function customerDetail(id){
       <span>${(i||[]).map(x=>esc(x.service_name_ar)).join('، ')}</span>
       <strong>${money(o.total_amount)}</strong>
     </div>
+    ${renderRequirements(reqs||[])}
+    ${o.expected_ready_at?`<div class="eta"><small>الوقت المتوقع</small><b>${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}</b></div>`:''}
     <h3>التتبّع</h3>
     <div class="timeline">${(e||[]).map(x=>`<div><b>${esc(x.label_ar)}</b><small>${new Date(x.created_at).toLocaleString('ar-LB')}</small></div>`).join('')}</div>
     ${(d||[]).map(x=>`<button class="download full" data-download="${esc(x.storage_path)}">${esc(x.original_name||'فتح المستند')}</button>`).join('')}
     ${o.status==='submitted'?`<button class="danger full" data-cancel="${o.id}">إلغاء الطلب</button>`:''}
   </section>`);
   bind();
+  bindRequirementActions({toast,busy,reload:customerDetail});
   liveChannel=supabase.channel('customer-order-'+id)
     .on('postgres_changes',{event:'*',schema:'public',table:'order_events',filter:`order_id=eq.${id}`},()=>customerDetail(id))
     .on('postgres_changes',{event:'UPDATE',schema:'public',table:'orders',filter:`id=eq.${id}`},()=>customerDetail(id))
