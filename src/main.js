@@ -692,7 +692,10 @@ function bind(){
 }
 async function agentStatus(id,status){
   const {error}=await supabase.rpc('admin_set_agent_status',{p_agent_id:id,p_status:status});
-  error?toast(error.message,true):admin();
+  if(error)return toast(error.message,true);
+  const r=location.hash.slice(1);
+  if(r.startsWith('admin-agent/'))adminAgent(id);
+  else admin();
 }
 
 window.addEventListener('hashchange',render);
