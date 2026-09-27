@@ -1,4 +1,4 @@
-export function renderNewOrder({services,bundleItems,profile,gov,esc,money}){
+export function renderNewOrder({services,bundleItems,serviceRequirements,profile,gov,esc,money}){
   const byId=Object.fromEntries(services.map(s=>[s.id,s]));
   const bundleMap={};
   for(const row of bundleItems||[]){
@@ -24,15 +24,15 @@ export function renderNewOrder({services,bundleItems,profile,gov,esc,money}){
   }).join('');
 
   return `<section class="orderflow">
-    <div class="title"><h2>طلب جديد</h2><button data-go="home">رجوع</button></div>
+    <div class="title"><h2>طلب جديد</h2><button data-go="customer">رجوع</button></div>
     <form id="order">
       <section class="flowstep">
-        <div class="stephead"><span>1</span><div><b>اختر الخدمة</b><small>يمكنك اختيار أكثر من مستند، أو الملف الكامل.</small></div></div>
+        <div class="stephead"><span>1</span><div><b>اختر الخدمة</b><small>اختر مستنداً أو أكثر، أو حزمة كاملة.</small></div></div>
         <div class="servicegrid">${cards}</div>
       </section>
 
       <section class="flowstep orderdetails" id="orderDetails" hidden>
-        <div class="stephead"><span>2</span><div><b>بيانات العقار</b><small>نحتاج فقط المعلومات التي تحدد العقار.</small></div></div>
+        <div class="stephead"><span>2</span><div><b>بيانات العقار</b><small>المعلومات التي تحدد العقار.</small></div></div>
         <div class="grid">
           <select name="governorate" required><option value="">المحافظة</option>${gov.map(x=>`<option>${esc(x)}</option>`).join('')}</select>
           <input name="district" placeholder="القضاء (اختياري)">
@@ -44,16 +44,31 @@ export function renderNewOrder({services,bundleItems,profile,gov,esc,money}){
         <input name="property_section" placeholder="القسم / الحصة (إذا وجد)">
       </section>
 
+      <section class="flowstep orderdetails" id="preorderRequirementsSection" hidden>
+        <div class="stephead"><span>3</span><div><b>المعلومات المطلوبة</b><small>تتغير تلقائياً حسب الخدمة التي اخترتها.</small></div></div>
+        <div id="preorderRequirements" class="prerequirements"></div>
+      </section>
+
       <section class="flowstep orderdetails" hidden>
-        <div class="stephead"><span>3</span><div><b>بيانات التواصل</b><small>لإرسال التحديثات والمستندات.</small></div></div>
-        <input name="name" value="${esc(profile?.full_name||'')}" placeholder="الاسم">
+        <div class="stephead"><span>4</span><div><b>بيانات التواصل</b><small>للتحديثات والمستندات.</small></div></div>
+        <input name="name" value="${esc(profile?.full_name||'')}" required placeholder="الاسم">
         <input name="email" type="email" value="${esc(profile?.email||'')}" required placeholder="البريد الإلكتروني">
         <input name="phone" value="${esc(profile?.phone||'')}" required placeholder="رقم الهاتف">
         <textarea name="notes" placeholder="ملاحظة (اختياري)"></textarea>
       </section>
 
+      <section class="flowstep orderreview" id="orderReview" hidden>
+        <div class="stephead"><span>5</span><div><b>راجع الطلب</b><small>تأكد من التفاصيل قبل التأكيد.</small></div></div>
+        <div class="reviewgrid">
+          <div><small>الخدمة</small><b id="reviewServices"></b></div>
+          <div><small>العقار</small><b id="reviewProperty">—</b></div>
+          <div><small>المطلوب منك</small><b id="reviewRequirements">—</b></div>
+          <div><small>الإجمالي</small><b id="reviewTotal"></b></div>
+        </div>
+      </section>
+
       <div class="ordersummary" id="orderSummary" hidden>
-        <div><small id="orderSummaryLabel">الخدمات المختارة</small><b id="orderSummaryNames"></b></div>
+        <div><small>طلبك</small><b id="orderSummaryNames"></b></div>
         <strong id="orderSummaryTotal"></strong>
         <button class="primary" id="orderSubmit">تأكيد الطلب</button>
       </div>
@@ -61,15 +76,103 @@ export function renderNewOrder({services,bundleItems,profile,gov,esc,money}){
   </section>`;
 }
 
-export function bindServiceSelection({services,money,toast}){
+export function bindServiceSelection({services,bundleItems,serviceRequirements,money,toast}){
   const form=document.querySelector('#order');
   if(!form)return;
+
   const checks=[...form.querySelectorAll('[data-service-code]')];
   const detailSections=[...form.querySelectorAll('.orderdetails')];
   const summary=form.querySelector('#orderSummary');
+  const review=form.querySelector('#orderReview');
   const names=form.querySelector('#orderSummaryNames');
   const totalEl=form.querySelector('#orderSummaryTotal');
+  const reviewServices=form.querySelector('#reviewServices');
+  const reviewProperty=form.querySelector('#reviewProperty');
+  const reviewRequirements=form.querySelector('#reviewRequirements');
+  const reviewTotal=form.querySelector('#reviewTotal');
+  const reqSection=form.querySelector('#preorderRequirementsSection');
+  const reqContainer=form.querySelector('#preorderRequirements');
   const byCode=Object.fromEntries(services.map(s=>[s.code,s]));
+  const bundleMap={};
+
+  for(const row of bundleItems||[]){
+    (bundleMap[row.bundle_service_id]??=[]).push(row.item_service_id);
+  }
+
+  const selectedRequirements=chosen=>{
+    const ids=new Set();
+    chosen.forEach(s=>{
+      ids.add(s.id);
+      if(s.service_type==='bundle'){
+        (bundleMap[s.id]||[]).forEach(id=>ids.add(id));
+      }
+    });
+
+    const rows=(serviceRequirements||[])
+      .filter(r=>r.active!==false&&ids.has(r.service_id))
+      .sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+
+    const seen=new Map();
+    for(const row of rows){
+      const old=seen.get(row.code);
+      if(!old)seen.set(row.code,{...row});
+      else if(row.required&&!old.required)seen.set(row.code,{...old,required:true});
+    }
+    return [...seen.values()];
+  };
+
+  const escAttr=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  const renderReqs=reqs=>{
+    if(!reqs.length){
+      reqContainer.innerHTML='<div class="empty">لا توجد معلومات إضافية مطلوبة لهذه الخدمة.</div>';
+      reqSection.hidden=false;
+      return;
+    }
+
+    reqContainer.innerHTML=reqs.map(r=>{
+      const required=r.required?'required':'';
+      const badge=r.required?'مطلوب':'اختياري';
+      const safeCode=escAttr(r.code);
+      if(r.requirement_type==='file'){
+        return `<label class="prereq">
+          <span><b>${escAttr(r.label_ar)}</b><small>${badge}</small></span>
+          <input type="file" name="req_file__${safeCode}" data-pre-req-code="${safeCode}" data-pre-req-type="file" ${required} accept=".pdf,image/jpeg,image/png,image/webp">
+        </label>`;
+      }
+      return `<label class="prereq">
+        <span><b>${escAttr(r.label_ar)}</b><small>${badge}</small></span>
+        <input name="req_text__${safeCode}" data-pre-req-code="${safeCode}" data-pre-req-type="text" ${required} placeholder="${escAttr(r.label_ar)}">
+      </label>`;
+    }).join('');
+    reqSection.hidden=false;
+  };
+
+  const updateReview=()=>{
+    const selected=checks.filter(x=>x.checked);
+    const chosen=selected.map(x=>byCode[x.value]).filter(Boolean);
+    if(!chosen.length)return;
+
+    const reqs=selectedRequirements(chosen);
+    const required=reqs.filter(r=>r.required);
+    const completed=required.filter(r=>{
+      const input=form.querySelector(`[data-pre-req-code="${CSS.escape(r.code)}"]`);
+      if(!input)return false;
+      return input.type==='file'?!!input.files?.[0]:!!input.value?.trim();
+    }).length;
+
+    const gov=form.elements.governorate?.value||'';
+    const district=form.elements.district?.value||'';
+    const cadastral=form.elements.cadastral_area?.value||'';
+    const property=form.elements.property_number?.value||'';
+    const propertyBits=[gov,district,cadastral,property?`عقار ${property}`:''].filter(Boolean);
+
+    const total=chosen.reduce((sum,s)=>sum+Number(s.customer_price||0)+Number(s.official_fee||0),0);
+    reviewServices.textContent=chosen.map(x=>x.name_ar).join('، ');
+    reviewProperty.textContent=propertyBits.join(' • ')||'—';
+    reviewRequirements.textContent=required.length?`${completed}/${required.length} مكتمل`:'لا يوجد متطلبات إضافية';
+    reviewTotal.textContent=money(total);
+  };
 
   const refresh=changed=>{
     const changedService=changed?byCode[changed.value]:null;
@@ -83,22 +186,48 @@ export function bindServiceSelection({services,money,toast}){
     const active=selected.length>0;
     detailSections.forEach(x=>x.hidden=!active);
     summary.hidden=!active;
+    review.hidden=!active;
+
     form.querySelectorAll('.servicecard').forEach(card=>{
       const input=card.querySelector('input');
       card.classList.toggle('selected',!!input?.checked);
     });
 
-    if(!active)return;
+    if(!active){
+      reqSection.hidden=true;
+      reqContainer.innerHTML='';
+      return;
+    }
+
     const chosen=selected.map(x=>byCode[x.value]).filter(Boolean);
+    const reqs=selectedRequirements(chosen);
+    renderReqs(reqs);
+
+    const total=chosen.reduce((sum,s)=>sum+Number(s.customer_price||0)+Number(s.official_fee||0),0);
     names.textContent=chosen.map(x=>x.name_ar).join('، ');
-    totalEl.textContent=money(chosen.reduce((sum,s)=>sum+Number(s.customer_price||0)+Number(s.official_fee||0),0));
+    totalEl.textContent=money(total);
+    updateReview();
   };
 
   checks.forEach(x=>x.addEventListener('change',()=>refresh(x)));
+  form.addEventListener('input',updateReview);
+  form.addEventListener('change',e=>{
+    if(e.target?.matches?.('[data-pre-req-code],select'))updateReview();
+  });
+
   form.addEventListener('submit',e=>{
     if(!checks.some(x=>x.checked)){
       e.preventDefault();
       toast?.('اختر خدمة واحدة على الأقل',true);
+      return;
+    }
+
+    const missing=[...form.querySelectorAll('[data-pre-req-code][required]')].some(input=>
+      input.type==='file'?!input.files?.[0]:!input.value?.trim()
+    );
+    if(missing){
+      e.preventDefault();
+      toast?.('أكمل المعلومات المطلوبة قبل تأكيد الطلب',true);
     }
   });
 }
