@@ -422,6 +422,49 @@ async function admin(){
   </section>`);
   bind();
 }
+async function adminDispute(id){
+  clearLive();
+  if(profile?.role!=='admin')return go('home');
+
+  const {data:d,error}=await supabase.from('disputes').select('*').eq('id',id).single();
+  if(error||!d)return toast(error?.message||'تعذر فتح طلب الدعم',true);
+
+  const [{data:o},{data:p}]=await Promise.all([
+    supabase.from('orders').select('*').eq('id',d.order_id).single(),
+    supabase.from('profiles').select('full_name,email,phone').eq('id',d.opened_by).maybeSingle()
+  ]);
+
+  app.innerHTML=shell(`<section class="card">
+    <div class="title"><h2>طلب دعم</h2><button data-go="admin">رجوع</button></div>
+
+    <div class="jobinfo">
+      <div><small>الطلب</small><b>${esc(o?.public_code||'—')}</b></div>
+      <div><small>العميل</small><b>${esc(p?.full_name||o?.customer_name||'—')}</b></div>
+      <div><small>الهاتف</small><b>${esc(p?.phone||o?.customer_phone||'—')}</b></div>
+      <div><small>الحالة</small><b>${d.status==='open'?'جديد':d.status==='reviewing'?'قيد المراجعة':d.status==='resolved'?'تم الحل':'مغلق'}</b></div>
+    </div>
+
+    <h3>المشكلة</h3>
+    <div class="feedbackdone"><b>${esc(d.reason)}</b><small>${new Date(d.created_at).toLocaleString('ar-LB')}</small></div>
+
+    ${d.resolution?`<h3>الرد</h3><div class="feedbackdone"><b>رد الإدارة</b><small>${esc(d.resolution)}</small></div>`:''}
+
+    ${['open','reviewing'].includes(d.status)?`
+      <form id="disputeResolutionForm" data-dispute-id="${d.id}">
+        <textarea name="resolution" placeholder="اكتب الرد أو الحل"></textarea>
+        <div class="supportactions">
+          ${d.status==='open'?`<button type="button" class="secondary" data-dispute-reviewing="${d.id}">بدء المراجعة</button>`:''}
+          <button class="primary" name="action" value="resolved">حل الطلب</button>
+          <button class="secondary" name="action" value="closed">إغلاق</button>
+        </div>
+      </form>
+    `:''}
+
+    ${o?`<button class="secondary full" data-admin-order="${o.id}">فتح الطلب</button>`:''}
+  </section>`);
+  bind();
+}
+
 async function adminAgent(id){
   clearLive();
   if(profile?.role!=='admin')return go('home');
@@ -568,6 +611,7 @@ function render(){
   else if(r==='agent-register'){app.innerHTML='';return agentRegister();}
   else if(r==='staff')return staffAccess();
   else if(r==='admin')return admin();
+  else if(r.startsWith('admin-dispute/'))return adminDispute(r.split('/')[1]);
   else if(r.startsWith('admin-agent/'))return adminAgent(r.split('/')[1]);
   else if(r.startsWith('admin-order/'))return adminOrder(r.split('/')[1]);
   else if(profile?.role==='agent')return agentPortal();
@@ -823,6 +867,7 @@ function bind(){
   document.querySelectorAll('[data-order]').forEach(x=>x.onclick=()=>customerDetail(x.dataset.order));
   document.querySelectorAll('[data-admin-order]').forEach(x=>x.onclick=()=>go('admin-order/'+x.dataset.adminOrder));
   document.querySelectorAll('[data-admin-agent]').forEach(x=>x.onclick=()=>go('admin-agent/'+x.dataset.adminAgent));
+  document.querySelectorAll('[data-admin-dispute]').forEach(x=>x.onclick=()=>go('admin-dispute/'+x.dataset.adminDispute));
   document.querySelectorAll('[data-agent-order]').forEach(x=>x.onclick=()=>agentJob(x.dataset.agentOrder));
 
   document.querySelectorAll('[data-accept]').forEach(x=>x.onclick=async()=>{
@@ -867,6 +912,35 @@ function bind(){
 
   document.querySelectorAll('[data-approve]').forEach(x=>x.onclick=()=>agentStatus(x.dataset.approve,'approved'));
   document.querySelectorAll('[data-suspend]').forEach(x=>x.onclick=()=>agentStatus(x.dataset.suspend,'suspended'));
+  document.querySelectorAll('[data-dispute-reviewing]').forEach(x=>x.onclick=async()=>{
+    busy(x,true);
+    const {error}=await supabase.rpc('admin_update_dispute',{
+      p_dispute_id:x.dataset.disputeReviewing,
+      p_status:'reviewing',
+      p_resolution:null
+    });
+    busy(x,false);
+    error?toast(error.message,true):(toast('تم بدء المراجعة'),adminDispute(x.dataset.disputeReviewing));
+  });
+
+  const disputeResolution=document.querySelector('#disputeResolutionForm');
+  if(disputeResolution)disputeResolution.onsubmit=async e=>{
+    e.preventDefault();
+    const d=new FormData(disputeResolution);
+    const action=e.submitter?.value||'resolved';
+    const resolution=String(d.get('resolution')||'').trim();
+    if(resolution.length<2)return toast('اكتب الرد أو الحل',true);
+    const b=e.submitter;
+    busy(b,true);
+    const {error}=await supabase.rpc('admin_update_dispute',{
+      p_dispute_id:disputeResolution.dataset.disputeId,
+      p_status:action,
+      p_resolution:resolution
+    });
+    busy(b,false);
+    error?toast(error.message,true):(toast(action==='resolved'?'تم حل طلب الدعم':'تم إغلاق طلب الدعم'),adminDispute(disputeResolution.dataset.disputeId));
+  });
+
   const adminStatus=document.querySelector('#adminStatusForm');
   if(adminStatus)adminStatus.onsubmit=async e=>{
     e.preventDefault();const d=new FormData(adminStatus),b=adminStatus.querySelector('button');busy(b,true);
