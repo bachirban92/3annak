@@ -390,11 +390,12 @@ async function staffAccess(){
 async function admin(){
   clearLive();
   if(profile?.role!=='admin')return go('home');
-  const [{data:a},{data:s},{data:o},{data:reqs}]=await Promise.all([
+  const [{data:a},{data:s},{data:o},{data:reqs},{data:disputes}]=await Promise.all([
     supabase.from('agent_profiles').select('*').order('created_at',{ascending:false}),
     supabase.from('services').select('*').order('sort_order'),
     supabase.from('orders').select('*').order('created_at',{ascending:false}).limit(50),
-    supabase.from('service_requirements').select('*').order('sort_order')
+    supabase.from('service_requirements').select('*').order('sort_order'),
+    supabase.from('disputes').select('*').in('status',['open','reviewing']).order('created_at',{ascending:false}).limit(20)
   ]);
   const ids=(a||[]).map(x=>x.user_id),names={};
   if(ids.length){
@@ -408,23 +409,14 @@ async function admin(){
       <span><b>${esc(names[x.user_id]?.full_name||names[x.user_id]?.email||x.user_id)}</b><small>${esc(names[x.user_id]?.phone||'')} • ${x.verification_status}</small></span>
       <i>فتح</i>
     </button>`).join('')||'<div class="empty">لا يوجد.</div>'}</div>
+    <h3>الدعم</h3>
+    <div class="stack">${(disputes||[]).map(d=>`<button class="row" data-admin-dispute="${d.id}">
+      <span><b>طلب دعم</b><small>${esc(d.reason)}</small></span>
+      <i>${d.status==='reviewing'?'قيد المراجعة':'جديد'}</i>
+    </button>`).join('')||'<div class="empty">لا توجد طلبات دعم مفتوحة.</div>'}</div>
+
     <h3>الخدمات والتسعير</h3>
     <div class="stack">${renderServicesAdmin(s||[],reqs||[])}</div>
-    <h3>الدفعات</h3>
-    <div class="payoutadmin">
-      <div class="payoutcreate">
-        <span><small>المتاح للدفع</small><b>${money(available)}</b></span>
-        <button class="primary" data-create-payout="${id}" ${available>0?'':'disabled'}>إنشاء دفعة</button>
-      </div>
-      <div class="stack">${(payouts||[]).map(p=>`<div class="adminrow">
-        <span><b>${money(p.amount)}</b><small>${new Date(p.created_at).toLocaleDateString('ar-LB')}${p.provider_reference?' • '+esc(p.provider_reference):''}</small></span>
-        <div class="verifyactions">
-          <i>${p.status==='paid'?'مدفوع':p.status==='pending'?'قيد الدفع':'ملغى'}</i>
-          ${p.status==='pending'?`<button class="primary compact" data-pay-payout="${p.id}" data-agent-id="${id}">تم الدفع</button><button class="secondary compact" data-cancel-payout="${p.id}" data-agent-id="${id}">إلغاء</button>`:''}
-        </div>
-      </div>`).join('')||'<div class="empty">لا توجد دفعات بعد.</div>'}</div>
-    </div>
-
     <h3>آخر الطلبات</h3>
     <div class="stack">${(o||[]).map(x=>`<button class="row" data-admin-order="${x.id}"><span><b>${x.public_code}</b><small>${esc(x.cadastral_area)} • ${esc(x.property_number)}</small></span><i>${labels[x.status]}</i></button>`).join('')}</div>
   </section>`);
