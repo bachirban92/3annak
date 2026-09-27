@@ -644,40 +644,105 @@ async function adminAccess(){
   bind();
 }
 
-async function admin(){
+async function admin(section='overview'){
   clearLive();
   if(profile?.role!=='admin')return go('home');
-  const [{data:a},{data:s},{data:o},{data:reqs},{data:disputes},{data:workflow},{data:bundles}]=await Promise.all([
+
+  const allowed=new Set(['overview','orders','agents','services','support']);
+  if(!allowed.has(section))section='overview';
+
+  const [{data:a},{data:srv},{data:o},{data:reqs},{data:disputes},{data:workflow},{data:bundles}]=await Promise.all([
     supabase.from('agent_profiles').select('*').order('created_at',{ascending:false}),
     supabase.from('services').select('*').order('sort_order'),
     supabase.from('orders').select('*').order('created_at',{ascending:false}).limit(50),
     supabase.from('service_requirements').select('*').order('sort_order'),
-    supabase.from('disputes').select('*').in('status',['open','reviewing']).order('created_at',{ascending:false}).limit(20),
+    supabase.from('disputes').select('*').in('status',['open','reviewing']).order('created_at',{ascending:false}).limit(50),
     supabase.from('service_workflow_steps').select('*').order('sort_order'),
     supabase.from('service_bundle_items').select('*').order('sort_order')
   ]);
+
   const ids=(a||[]).map(x=>x.user_id),names={};
   if(ids.length){
     const {data:p}=await supabase.from('profiles').select('id,full_name,email,phone').in('id',ids);
     (p||[]).forEach(x=>names[x.id]=x);
   }
-  app.innerHTML=shell(`<section>
-    <div class="title"><h2>الإدارة</h2><button data-go="home">رجوع</button></div>
-    <h3>الوكلاء</h3>
-    <div class="stack">${(a||[]).map(x=>`<button class="row" data-admin-agent="${x.user_id}">
-      <span><b>${esc(names[x.user_id]?.full_name||names[x.user_id]?.email||x.user_id)}</b><small>${esc(names[x.user_id]?.phone||'')} • ${x.verification_status}</small></span>
-      <i>فتح</i>
-    </button>`).join('')||'<div class="empty">لا يوجد.</div>'}</div>
-    <h3>الدعم</h3>
-    <div class="stack">${(disputes||[]).map(d=>`<button class="row" data-admin-dispute="${d.id}">
-      <span><b>طلب دعم</b><small>${esc(d.reason)}</small></span>
-      <i>${d.status==='reviewing'?'قيد المراجعة':'جديد'}</i>
-    </button>`).join('')||'<div class="empty">لا توجد طلبات دعم مفتوحة.</div>'}</div>
 
-    <h3>الخدمات والتسعير</h3>
-    <div class="stack">${renderServicesAdmin(s||[],reqs||[],workflow||[],bundles||[])}</div>
-    <h3>آخر الطلبات</h3>
-    <div class="stack">${(o||[]).map(x=>`<button class="row" data-admin-order="${x.id}"><span><b>${x.public_code}</b><small>${esc(x.cadastral_area)} • ${esc(x.property_number)}</small></span><i>${labels[x.status]}</i></button>`).join('')}</div>
+  const activeOrders=(o||[]).filter(x=>!['completed','cancelled'].includes(x.status)).length;
+  const pendingAgents=(a||[]).filter(x=>x.verification_status==='pending').length;
+  const activeServices=(srv||[]).filter(x=>x.active).length;
+  const openSupport=(disputes||[]).length;
+
+  const nav=`<div class="adminnav">
+    <button class="${section==='overview'?'active':''}" data-go="admin">الرئيسية</button>
+    <button class="${section==='orders'?'active':''}" data-go="admin/orders">الطلبات</button>
+    <button class="${section==='agents'?'active':''}" data-go="admin/agents">الوكلاء</button>
+    <button class="${section==='services'?'active':''}" data-go="admin/services">الخدمات</button>
+    <button class="${section==='support'?'active':''}" data-go="admin/support">الدعم</button>
+  </div>`;
+
+  let body='';
+
+  if(section==='overview'){
+    body=`
+      <div class="adminmetrics">
+        <button data-go="admin/orders"><small>طلبات جارية</small><b>${activeOrders}</b></button>
+        <button data-go="admin/agents"><small>وكلاء بانتظار المراجعة</small><b>${pendingAgents}</b></button>
+        <button data-go="admin/support"><small>دعم مفتوح</small><b>${openSupport}</b></button>
+        <button data-go="admin/services"><small>خدمات فعّالة</small><b>${activeServices}</b></button>
+      </div>
+      <section class="adminpanel">
+        <div class="adminsectionhead"><h3>آخر الطلبات</h3><button data-go="admin/orders">عرض الكل</button></div>
+        <div class="stack">${(o||[]).slice(0,6).map(x=>`<button class="row" data-admin-order="${x.id}">
+          <span><b>${x.public_code}</b><small>${esc(x.cadastral_area)} • ${esc(x.property_number)}</small></span>
+          <i>${labels[x.status]||x.status}</i>
+        </button>`).join('')||'<div class="empty">لا توجد طلبات.</div>'}</div>
+      </section>`;
+  }
+
+  if(section==='orders'){
+    body=`<section class="adminpanel">
+      <div class="adminsectionhead"><h3>الطلبات</h3><small>${(o||[]).length} طلب</small></div>
+      <div class="stack">${(o||[]).map(x=>`<button class="row" data-admin-order="${x.id}">
+        <span><b>${x.public_code}</b><small>${esc(x.cadastral_area)} • ${esc(x.property_number)}</small></span>
+        <i>${labels[x.status]||x.status}</i>
+      </button>`).join('')||'<div class="empty">لا توجد طلبات.</div>'}</div>
+    </section>`;
+  }
+
+  if(section==='agents'){
+    body=`<section class="adminpanel">
+      <div class="adminsectionhead"><h3>الوكلاء</h3><small>${(a||[]).length} وكيل</small></div>
+      <div class="stack">${(a||[]).map(x=>`<button class="row" data-admin-agent="${x.user_id}">
+        <span><b>${esc(names[x.user_id]?.full_name||names[x.user_id]?.email||x.user_id)}</b><small>${esc(names[x.user_id]?.phone||'')}</small></span>
+        <i>${x.verification_status==='approved'?'معتمد':x.verification_status==='pending'?'قيد المراجعة':x.verification_status==='suspended'?'موقوف':'مرفوض'}</i>
+      </button>`).join('')||'<div class="empty">لا يوجد وكلاء.</div>'}</div>
+    </section>`;
+  }
+
+  if(section==='services'){
+    body=`<section class="adminpanel">
+      <div class="adminsectionhead"><h3>الخدمات</h3><small>التسعير والمتطلبات ومراحل التنفيذ</small></div>
+      <div class="stack">${renderServicesAdmin(srv||[],reqs||[],workflow||[],bundles||[])}</div>
+    </section>`;
+  }
+
+  if(section==='support'){
+    body=`<section class="adminpanel">
+      <div class="adminsectionhead"><h3>الدعم</h3><small>${openSupport} مفتوح</small></div>
+      <div class="stack">${(disputes||[]).map(d=>`<button class="row" data-admin-dispute="${d.id}">
+        <span><b>طلب دعم</b><small>${esc(d.reason)}</small></span>
+        <i>${d.status==='reviewing'?'قيد المراجعة':'جديد'}</i>
+      </button>`).join('')||'<div class="empty">لا توجد طلبات دعم مفتوحة.</div>'}</div>
+    </section>`;
+  }
+
+  app.innerHTML=shell(`<section class="admindashboard">
+    <div class="adminbar">
+      <div><small>لوحة الإدارة</small><h2>عنّك</h2></div>
+      <button class="ghost" data-account-logout>تسجيل الخروج</button>
+    </div>
+    ${nav}
+    ${body}
   </section>`);
   bind();
 }
