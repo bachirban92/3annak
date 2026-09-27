@@ -32,7 +32,7 @@ function toast(msg,bad=false){
 function clearLive(){if(liveChannel){supabase.removeChannel(liveChannel);liveChannel=null}}
 function shell(body){
   let right='';
-  if(profile?.role==='agent') right=`<button class="toplink withicon" data-go="agent">${icon('briefcase')}<span>بوابة الوكيل</span></button>`;
+  if(profile?.role==='agent') right='';
   else if(profile?.role==='admin') right=`<button class="toplink withicon" data-go="admin">${icon('settings')}<span>الإدارة</span></button>`;
   else right=`<button class="toplink withicon" data-go="orders">${icon('orders')}<span>طلباتي</span></button>`;
   return `<header><button class="brand" data-go="home">عنّك</button>${right}</header><main>${body}</main>`;
@@ -345,7 +345,10 @@ async function admin(){
   app.innerHTML=shell(`<section>
     <div class="title"><h2>الإدارة</h2><button data-go="home">رجوع</button></div>
     <h3>الوكلاء</h3>
-    <div class="stack">${(a||[]).map(x=>`<div class="adminrow"><span><b>${esc(names[x.user_id]?.full_name||names[x.user_id]?.email||x.user_id)}</b><small>${x.verification_status}</small></span>${x.verification_status==='approved'?`<button class="danger" data-suspend="${x.user_id}">تعليق</button>`:`<button class="primary" data-approve="${x.user_id}">اعتماد</button>`}</div>`).join('')||'<div class="empty">لا يوجد.</div>'}</div>
+    <div class="stack">${(a||[]).map(x=>`<button class="row" data-admin-agent="${x.user_id}">
+      <span><b>${esc(names[x.user_id]?.full_name||names[x.user_id]?.email||x.user_id)}</b><small>${esc(names[x.user_id]?.phone||'')} • ${x.verification_status}</small></span>
+      <i>فتح</i>
+    </button>`).join('')||'<div class="empty">لا يوجد.</div>'}</div>
     <h3>الخدمات والتسعير</h3>
     <div class="stack">${renderServicesAdmin(s||[],reqs||[])}</div>
     <h3>آخر الطلبات</h3>
@@ -353,6 +356,61 @@ async function admin(){
   </section>`);
   bind();
 }
+async function adminAgent(id){
+  clearLive();
+  if(profile?.role!=='admin')return go('home');
+
+  const [{data:a,error},{data:p},{data:coverage},{data:orders},{data:ledger}]=await Promise.all([
+    supabase.from('agent_profiles').select('*').eq('user_id',id).single(),
+    supabase.from('profiles').select('id,full_name,email,phone,is_active').eq('id',id).single(),
+    supabase.from('agent_coverage').select('*').eq('agent_id',id).eq('active',true),
+    supabase.from('orders').select('*').eq('assigned_agent_id',id).order('created_at',{ascending:false}).limit(30),
+    supabase.from('agent_ledger').select('*').eq('agent_id',id).order('created_at',{ascending:false}).limit(100)
+  ]);
+
+  if(error||!a)return toast(error?.message||'تعذر فتح الوكيل',true);
+
+  const pending=(ledger||[]).filter(x=>x.status==='pending'&&x.entry_type!=='payout').reduce((s,x)=>s+Number(x.amount||0),0);
+  const available=(ledger||[]).filter(x=>x.status==='available'&&x.entry_type!=='payout').reduce((s,x)=>s+Number(x.amount||0),0);
+  const paid=(ledger||[]).filter(x=>x.status==='paid'&&x.entry_type!=='payout').reduce((s,x)=>s+Number(x.amount||0),0);
+
+  app.innerHTML=shell(`<section>
+    <div class="title"><h2>${esc(p?.full_name||'وكيل')}</h2><button data-go="admin">رجوع</button></div>
+
+    <div class="card agentprofilecard">
+      <div class="jobinfo">
+        <div><small>البريد</small><b>${esc(p?.email||'—')}</b></div>
+        <div><small>الهاتف</small><b>${esc(p?.phone||'—')}</b></div>
+        <div><small>الحالة</small><b>${esc(a.verification_status)}</b></div>
+        <div><small>الطلبات المكتملة</small><b>${a.completed_orders||0}</b></div>
+      </div>
+
+      <div class="adminagentactions">
+        ${a.verification_status==='approved'
+          ?`<button class="secondary" data-suspend="${id}">تعليق الوكيل</button>`
+          :`<button class="primary" data-approve="${id}">اعتماد الوكيل</button>`}
+      </div>
+    </div>
+
+    <h3>مناطق العمل</h3>
+    <div class="stack">${(coverage||[]).map(x=>`<div class="adminrow"><span><b>${esc(x.governorate)}</b><small>${esc(x.district||'كل المحافظة')}</small></span></div>`).join('')||'<div class="empty">لا توجد مناطق.</div>'}</div>
+
+    <h3>الأرباح</h3>
+    <div class="earningsgrid">
+      <div><small>قيد التنفيذ</small><b>${money(pending)}</b></div>
+      <div><small>متاح</small><b>${money(available)}</b></div>
+      <div><small>مدفوع</small><b>${money(paid)}</b></div>
+    </div>
+
+    <h3>آخر الطلبات</h3>
+    <div class="stack">${(orders||[]).map(o=>`<button class="row" data-admin-order="${o.id}">
+      <span><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span>
+      <i>${labels[o.status]||o.status}</i>
+    </button>`).join('')||'<div class="empty">لا توجد طلبات.</div>'}</div>
+  </section>`);
+  bind();
+}
+
 async function adminOrder(id){
   clearLive();
   if(profile?.role!=='admin')return go('home');
@@ -423,7 +481,9 @@ function render(){
   else if(r==='agent-register'){app.innerHTML='';return agentRegister();}
   else if(r==='staff')return staffAccess();
   else if(r==='admin')return admin();
+  else if(r.startsWith('admin-agent/'))return adminAgent(r.split('/')[1]);
   else if(r.startsWith('admin-order/'))return adminOrder(r.split('/')[1]);
+  else if(profile?.role==='agent')return agentPortal();
   else app.innerHTML=home();
   bind();
 }
@@ -561,6 +621,7 @@ function bind(){
 
   document.querySelectorAll('[data-order]').forEach(x=>x.onclick=()=>customerDetail(x.dataset.order));
   document.querySelectorAll('[data-admin-order]').forEach(x=>x.onclick=()=>go('admin-order/'+x.dataset.adminOrder));
+  document.querySelectorAll('[data-admin-agent]').forEach(x=>x.onclick=()=>go('admin-agent/'+x.dataset.adminAgent));
   document.querySelectorAll('[data-agent-order]').forEach(x=>x.onclick=()=>agentJob(x.dataset.agentOrder));
 
   document.querySelectorAll('[data-accept]').forEach(x=>x.onclick=async()=>{
