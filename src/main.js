@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js';
+import { icon } from './icons.js';
 
 const app=document.querySelector('#app');
 let session=null,profile=null,services=[],liveChannel=null;
@@ -29,9 +30,9 @@ function toast(msg,bad=false){
 function clearLive(){if(liveChannel){supabase.removeChannel(liveChannel);liveChannel=null}}
 function shell(body){
   let right='';
-  if(profile?.role==='agent') right='<button class="toplink" data-go="agent">بوابة الوكيل</button>';
-  else if(profile?.role==='admin') right='<button class="toplink" data-go="admin">الإدارة</button>';
-  else right='<button class="toplink" data-go="orders">طلباتي</button>';
+  if(profile?.role==='agent') right=`<button class="toplink withicon" data-go="agent">${icon('briefcase')}<span>بوابة الوكيل</span></button>`;
+  else if(profile?.role==='admin') right=`<button class="toplink withicon" data-go="admin">${icon('settings')}<span>الإدارة</span></button>`;
+  else right=`<button class="toplink withicon" data-go="orders">${icon('orders')}<span>طلباتي</span></button>`;
   return `<header><button class="brand" data-go="home">عنّك</button>${right}</header><main>${body}</main>`;
 }
 async function load(){
@@ -52,7 +53,7 @@ function home(){
   return shell(`<section class="hero">
     <small>معاملات عقارية في لبنان</small>
     <h1>اطلب أوراق عقارك.<br>ونحن نتابعها عنك.</h1>
-    <button class="primary" data-go="new">طلب جديد</button>
+    <button class="primary withicon" data-go="new">${icon('plus')}<span>طلب جديد</span></button>
   </section>`);
 }
 function newOrder(){
