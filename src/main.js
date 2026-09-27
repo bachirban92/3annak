@@ -476,12 +476,6 @@ function bind(){
   });
 
   bindServicesAdmin({toast,busy,reload:admin});
-
-  document.querySelectorAll('[data-service]').forEach(f=>f.onsubmit=async e=>{
-    e.preventDefault();const d=new FormData(f),b=f.querySelector('button');busy(b,true);
-    const {error}=await supabase.rpc('admin_update_service',{p_service_id:f.dataset.service,p_customer_price:+d.get('cp'),p_agent_payout:+d.get('ap'),p_active:d.get('active')==='on'});
-    busy(b,false);error?toast(error.message,true):toast('تم الحفظ');
-  });
 }
 async function agentStatus(id,status){
   const {error}=await supabase.rpc('admin_set_agent_status',{p_agent_id:id,p_status:status});
