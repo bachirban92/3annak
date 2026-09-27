@@ -325,6 +325,9 @@ async function agentJob(id){
     ready_for_collection:['collected','تم استلام المستند'],
     collected:['completed','إكمال الطلب']
   }[o.status];
+  const finalDocs=(docs||[]).filter(x=>x.kind==='final_document'&&x.deliverable_id);
+  const docByDeliverable=Object.fromEntries(finalDocs.map(x=>[x.deliverable_id,x]));
+  const missingDeliverables=(deliverables||[]).filter(x=>!docByDeliverable[x.id]);
 
   app.innerHTML=shell(`<section class="card">
     <div class="title"><h2>${o.public_code}</h2><button data-go="agent">رجوع</button></div>
@@ -339,19 +342,28 @@ async function agentJob(id){
       ${o.notes?`<div class="wide"><small>ملاحظة</small><b>${esc(o.notes)}</b></div>`:''}
     </div>
 
-    ${(deliverables||[]).length?`<h3>المطلوب تسليمه</h3><div class="deliverables agentdeliverables"><div>${deliverables.map(x=>`<span>${esc(x.service_name_ar)}</span>`).join('')}</div></div>`:''}
+    ${(deliverables||[]).length?`<h3>المطلوب تسليمه</h3>
+      <div class="deliverychecklist">
+        ${deliverables.map(x=>{
+          const d=docByDeliverable[x.id];
+          return `<div class="deliveryitem ${d?'done':''}">
+            <div class="deliverylabel"><span class="deliverystatus">${d?'✓':'○'}</span><span><b>${esc(x.service_name_ar)}</b><small>${d?'تم رفع المستند النهائي':'بانتظار المستند النهائي'}</small></span></div>
+            <div class="deliveryactions">
+              ${d?`<button class="secondary compact" data-download="${esc(d.storage_path)}">فتح</button>`:''}
+              <input id="deliverable-file-${x.id}" type="file" accept=".pdf,image/jpeg,image/png,image/webp">
+              <button class="secondary compact" data-deliverable-upload="${x.id}" data-order-id="${o.id}" data-old-path="${esc(d?.storage_path||'')}">${d?'استبدال':'رفع'}</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`:''}
 
     <h3>التتبّع</h3>
     <div class="timeline">${(events||[]).map(x=>`<div><b>${esc(x.label_ar)}</b><small>${new Date(x.created_at).toLocaleString('ar-LB')}</small></div>`).join('')}</div>
 
-    <div class="uploadbox">
-      <input id="jobFile" type="file" accept=".pdf,image/*">
-      <label class="check"><input id="visibleToCustomer" type="checkbox"> يظهر للعميل</label>
-      <button class="secondary full" data-upload="${o.id}">رفع ملف</button>
-      ${(docs||[]).length?`<small>${docs.length} ملف مرفوع</small>`:''}
-    </div>
-
-    ${next?`<button class="primary full next-action" data-status="${next[0]}" data-id="${o.id}">${next[1]}</button>`:'<div class="donebox">تم إكمال الطلب</div>'}
+    ${next?`
+      ${next[0]==='completed'&&missingDeliverables.length?`<div class="completebox requirementgate"><span class="completecheck">!</span><div><b>أكمل المستندات النهائية</b><small>باقي ${missingDeliverables.length} مستند قبل إكمال الطلب.</small></div></div>`:''}
+      <button class="primary full next-action" data-status="${next[0]}" data-id="${o.id}" ${next[0]==='completed'&&missingDeliverables.length?'disabled':''}>${next[1]}</button>
+    `:'<div class="donebox">تم إكمال الطلب</div>'}
   </section>`);
   bind();
 
@@ -872,22 +884,44 @@ function bind(){
   document.querySelectorAll('[data-status]').forEach(x=>x.onclick=async()=>{
     busy(x,true);
     const {error}=await supabase.rpc('update_order_status',{p_order_id:x.dataset.id,p_status:x.dataset.status,p_note:''});
-    if(error){busy(x,false);toast(error.message,true)}else{toast('تم تحديث الحالة');agentJob(x.dataset.id)}
+    if(error){
+      busy(x,false);
+      toast(error.message==='deliverables_incomplete'?'أكمل المستندات النهائية أولاً':error.message,true);
+    }else{toast('تم تحديث الحالة');agentJob(x.dataset.id)}
   });
 
-  document.querySelectorAll('[data-upload]').forEach(x=>x.onclick=async()=>{
-    const f=document.querySelector('#jobFile')?.files?.[0];
-    if(!f)return toast('اختر ملفاً أولاً',true);
+  document.querySelectorAll('[data-deliverable-upload]').forEach(x=>x.onclick=async()=>{
+    const input=document.querySelector('#deliverable-file-'+x.dataset.deliverableUpload);
+    const file=input?.files?.[0];
+    if(!file)return toast('اختر المستند أولاً',true);
+    if(file.size>10*1024*1024)return toast('الحد الأقصى للملف 10MB',true);
+    if(!['application/pdf','image/jpeg','image/png','image/webp'].includes(file.type))return toast('نوع الملف غير مدعوم',true);
+
     busy(x,true,'جارٍ الرفع...');
-    const path=x.dataset.upload+'/'+crypto.randomUUID()+'-'+f.name.replace(/[^a-zA-Z0-9._-]/g,'_');
-    const up=await supabase.storage.from('order-files').upload(path,f);
+    const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+    const path=x.dataset.orderId+'/'+crypto.randomUUID()+'-'+safe;
+    const up=await supabase.storage.from('order-files').upload(path,file);
     if(up.error){busy(x,false);return toast(up.error.message,true)}
-    const {error}=await supabase.from('documents').insert({
-      order_id:x.dataset.upload,kind:'final_document',storage_path:path,original_name:f.name,
-      mime_type:f.type,file_size:f.size,visible_to_customer:document.querySelector('#visibleToCustomer')?.checked||false,
-      uploaded_by:session.user.id
+
+    const saved=await supabase.rpc('submit_order_deliverable',{
+      p_deliverable_id:x.dataset.deliverableUpload,
+      p_storage_path:path,
+      p_original_name:file.name,
+      p_mime_type:file.type,
+      p_file_size:file.size
     });
-    busy(x,false);error?toast(error.message,true):(toast('تم رفع الملف'),agentJob(x.dataset.upload));
+
+    if(saved.error){
+      await supabase.storage.from('order-files').remove([path]);
+      busy(x,false);
+      return toast(saved.error.message,true);
+    }
+
+    const old=x.dataset.oldPath;
+    if(old&&old!==path)await supabase.storage.from('order-files').remove([old]);
+    busy(x,false);
+    toast('تم رفع المستند');
+    agentJob(x.dataset.orderId);
   });
 
   document.querySelectorAll('[data-download]').forEach(x=>x.onclick=async()=>{
