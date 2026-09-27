@@ -814,7 +814,8 @@ function bind(){
     busy(x,true,'جارٍ الإرسال...');
     const {error}=await supabase.auth.resend({
       type:'signup',
-      email:x.dataset.resendCustomerConfirm
+      email:x.dataset.resendCustomerConfirm,
+      options:{emailRedirectTo:'https://bachirban92.github.io/3annak/#customer'}
     });
     busy(x,false);
     error?toast(error.message,true):toast('تم إرسال رسالة التفعيل من جديد');
@@ -831,7 +832,10 @@ function bind(){
     const {data,error}=await supabase.auth.signUp({
       email,
       password,
-      options:{data:{full_name:String(f.get('name')||''),phone:String(f.get('phone')||'')}}
+      options:{
+        data:{full_name:String(f.get('name')||''),phone:String(f.get('phone')||'')},
+        emailRedirectTo:'https://bachirban92.github.io/3annak/#customer'
+      }
     });
     if(error){busy(b,false);return toast(error.message,true)}
     if(!data.session){
