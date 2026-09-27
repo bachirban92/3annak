@@ -167,6 +167,185 @@ async function customerPortal(){
     .on('postgres_changes',{event:'*',schema:'public',table:'orders',filter:`customer_id=eq.${session.user.id}`},()=>customerPortal())
     .subscribe();
 }
+async function accountPage(){
+  clearLive();
+  if(isAnonymousUser())return go('home');
+
+  const isAgent=profile?.role==='agent';
+  const agent=isAgent
+    ?(await supabase.from('agent_profiles').select('verification_status,completed_orders,rating,available').eq('user_id',session.user.id).maybeSingle()).data
+    :null;
+  const coverage=isAgent
+    ?(await supabase.from('agent_coverage').select('governorate,district').eq('agent_id',session.user.id).eq('active',true)).data||[]
+    :[];
+
+  const roleLabel=isAgent?'وكيل':profile?.role==='customer'?'عميل':'إدارة';
+  app.innerHTML=shell(`<section class="accountpage">
+    <div class="title">
+      <div><h2>حسابي</h2><small>${roleLabel}</small></div>
+      <button data-go="home">رجوع</button>
+    </div>
+
+    <section class="card">
+      <h3>معلومات الحساب</h3>
+      <form id="accountProfileForm">
+        <label>الاسم<input name="name" required value="${esc(profile?.full_name||'')}"></label>
+        <label>رقم الهاتف<input name="phone" value="${esc(profile?.phone||'')}"></label>
+        <label>البريد الإلكتروني<input value="${esc(session?.user?.email||profile?.email||'')}" disabled></label>
+        <button class="primary full">حفظ المعلومات</button>
+      </form>
+    </section>
+
+    ${isAgent?`<section class="card">
+      <h3>حساب الوكيل</h3>
+      <div class="accountfacts">
+        <div><small>حالة الحساب</small><b>${agent?.verification_status==='approved'?'معتمد':agent?.verification_status==='pending'?'قيد المراجعة':agent?.verification_status==='suspended'?'موقوف':'غير معتمد'}</b></div>
+        <div><small>طلبات مكتملة</small><b>${agent?.completed_orders||0}</b></div>
+        <div><small>مناطق العمل</small><b>${coverage.length||0}</b></div>
+      </div>
+      <small class="accountmuted">${coverage.map(x=>esc(x.governorate)+(x.district?' / '+esc(x.district):'')).join('، ')||'لا توجد مناطق عمل.'}</small>
+    </section>`:''}
+
+    <section class="card">
+      <h3>تغيير كلمة المرور</h3>
+      <form id="accountPasswordForm">
+        <input name="password" type="password" minlength="8" autocomplete="new-password" required placeholder="كلمة المرور الجديدة">
+        <input name="confirm" type="password" minlength="8" autocomplete="new-password" required placeholder="تأكيد كلمة المرور">
+        <button class="secondary full">تغيير كلمة المرور</button>
+      </form>
+    </section>
+
+    <button class="secondary full account-signout" data-account-logout>تسجيل الخروج</button>
+  </section>`);
+  bind();
+}
+
+function forgotPasswordPage(){
+  if(!isAnonymousUser())return go('account');
+  app.innerHTML=shell(`<section class="card narrow">
+    <div class="title"><h2>استعادة كلمة المرور</h2><button data-go="home">رجوع</button></div>
+    <form id="forgotPasswordForm">
+      <input name="email" type="email" autocomplete="email" required placeholder="البريد الإلكتروني">
+      <button class="primary full">إرسال رابط الاستعادة</button>
+    </form>
+  </section>`);
+  bind();
+}
+
+function resetPasswordPage(){
+  app.innerHTML=shell(`<section class="card narrow">
+    <h2>كلمة مرور جديدة</h2>
+    <form id="resetPasswordForm">
+      <input name="password" type="password" minlength="8" autocomplete="new-password" required placeholder="كلمة المرور الجديدة">
+      <input name="confirm" type="password" minlength="8" autocomplete="new-password" required placeholder="تأكيد كلمة المرور">
+      <button class="primary full">حفظ كلمة المرور</button>
+    </form>
+  </section>`);
+  bind();
+}
+
+function newOrder(){
+  if(isAnonymousUser())return customerAuthChoice();
+  if(profile?.role!=='customer')return profile?.role==='agent'?agentPortal():go('admin');
+  return shell(renderNewOrder({services,bundleItems,serviceRequirements,profile,gov,esc,money}));
+}
+async function orders(){
+  clearLive();
+  const {data,error}=await supabase.from('orders').select('*').eq('customer_id',session.user.id).order('created_at',{ascending:false});
+  if(error)return toast(error.message,true);
+  app.innerHTML=shell(`<section>
+    <div class="title"><h2>طلباتي</h2><button data-go="customer">رجوع</button></div>
+    <div class="stack">${(data||[]).map(o=>`<button class="row" data-order="${o.id}"><span><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span><i>${labels[o.status]||o.status}</i></button>`).join('')||'<div class="empty">لا يوجد طلبات.</div>'}</div>
+    <button class="primary full" data-go="new">طلب جديد</button>
+  </section>`);
+  bind();
+}
+async function customerDetail(id){
+  clearLive();
+  const [{data:o,error},{data:e},{data:d},{data:i},{data:reqs},{data:feedback},{data:deliverables},{data:payments}]=await Promise.all([
+    supabase.from('orders').select('*').eq('id',id).single(),
+    supabase.from('order_events').select('*').eq('order_id',id).order('created_at'),
+    supabase.from('documents').select('*').eq('order_id',id).eq('visible_to_customer',true).order('created_at'),
+    supabase.from('order_items').select('*').eq('order_id',id),
+    supabase.from('order_requirements').select('*').eq('order_id',id).order('created_at'),
+    supabase.rpc('get_order_feedback',{p_order_id:id}),
+    supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order'),
+    supabase.from('payments').select('*').eq('order_id',id).order('created_at',{ascending:false}).limit(1)
+  ]);
+  if(error)return toast(error.message,true);
+  const incompleteRequired=(reqs||[]).filter(r=>r.required&&!r.completed_at);
+  const payment=payments?.[0];
+  const paymentLabel=o.refund_pending?'رد المبلغ قيد المعالجة':
+    payment?.status==='paid'?'مدفوع':
+    payment?.status==='refunded'?'تم رد المبلغ':
+    payment?.status==='failed'?'فشل الدفع':'بانتظار الدفع';
+  app.innerHTML=shell(`<section class="card">
+    <div class="title"><h2>${o.public_code}</h2><button data-go="orders">رجوع</button></div>
+    <div class="summary">
+      <b>${esc(o.cadastral_area)} • عقار ${esc(o.property_number)}</b>
+      <span>${(i||[]).map(x=>esc(x.service_name_ar)).join('، ')}</span>
+      <strong>${money(o.total_amount)}</strong>
+    </div>
+    ${(paymentsEnabled||o.refund_pending||['paid','refunded','partially_refunded'].includes(payment?.status))?`<div class="paymentbox">
+      <div><small>الدفع</small><b>${paymentLabel}</b></div>
+      <strong>${money(payment?.amount??o.total_amount)}</strong>
+    </div>`:''}
+    ${o.status==='completed'?`<div class="completebox"><span class="completecheck">✓</span><div><b>اكتمل الطلب</b><small>مستنداتك جاهزة أدناه.</small></div></div>`:''}
+    ${incompleteRequired.length?`<div class="completebox requirementgate"><span class="completecheck">!</span><div><b>أكمل المعلومات المطلوبة</b><small>لن يظهر الطلب للوكلاء قبل إكمال ${incompleteRequired.length} عنصر مطلوب.</small></div></div>`:''}
+    ${(deliverables||[]).length?`<div class="deliverables"><small>المستندات المطلوبة</small><div>${deliverables.map(x=>`<span>${esc(x.service_name_ar)}</span>`).join('')}</div></div>`:''}
+    ${renderRequirements(reqs||[])}
+    ${o.expected_ready_at&&o.status!=='completed'?`<div class="eta"><small>الوقت المتوقع</small><b>${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}</b></div>`:''}
+
+    ${o.status==='completed'?`
+      <h3>المستندات النهائية</h3>
+      <div class="document-list">
+        ${(d||[]).filter(x=>x.kind==='final_document').map(x=>`<div class="document-row">
+          <div><b>${esc(x.original_name||'مستند')}</b><small>${esc(x.mime_type||'')}</small></div>
+          <div class="document-actions">
+            <button class="secondary compact" data-file-view="${esc(x.storage_path)}">عرض</button>
+            <button class="secondary compact" data-file-download="${esc(x.storage_path)}">تنزيل</button>
+          </div>
+        </div>`).join('')||'<div class="empty">لا يوجد مستند نهائي مرفوع بعد.</div>'}
+      </div>
+
+      <h3>التقييم</h3>
+      ${feedback?.rating
+        ?`<div class="feedbackdone"><b>${'★'.repeat(Number(feedback.rating.rating||0))}</b><small>${esc(feedback.rating.comment||'تم إرسال تقييمك.')}</small></div>`
+        :`<form id="ratingForm" data-order-id="${o.id}" class="feedbackform">
+            <select name="rating" required>
+              <option value="">اختر التقييم</option>
+              <option value="5">★★★★★</option>
+              <option value="4">★★★★</option>
+              <option value="3">★★★</option>
+              <option value="2">★★</option>
+              <option value="1">★</option>
+            </select>
+            <textarea name="comment" placeholder="ملاحظة (اختياري)"></textarea>
+            <button class="secondary full">إرسال التقييم</button>
+          </form>`}
+
+      <h3>الدعم</h3>
+      ${feedback?.dispute && ['open','reviewing'].includes(feedback.dispute.status)
+        ?`<div class="feedbackdone"><b>${feedback.dispute.status==='reviewing'?'طلب الدعم قيد المراجعة':'طلب الدعم مفتوح'}</b><small>${esc(feedback.dispute.reason)}</small></div>`
+        :`${feedback?.dispute?.resolution?`<div class="feedbackdone"><b>رد الإدارة</b><small>${esc(feedback.dispute.resolution)}</small></div>`:''}
+          <form id="supportForm" data-order-id="${o.id}" class="feedbackform">
+            <textarea name="reason" required minlength="3" placeholder="اشرح المشكلة باختصار"></textarea>
+            <button class="secondary full">طلب دعم جديد</button>
+          </form>`}
+    `:''}
+
+    <h3>التتبّع</h3>
+    <div class="timeline">${(e||[]).map(x=>`<div><b>${esc(x.label_ar)}</b><small>${new Date(x.created_at).toLocaleString('ar-LB')}</small></div>`).join('')}</div>
+    ${o.status!=='completed'?(d||[]).filter(x=>x.kind==='final_document').map(x=>`<button class="download full" data-download="${esc(x.storage_path)}">${esc(x.original_name||'فتح المستند')}</button>`).join(''):''}
+    ${o.status==='submitted'?`<button class="danger full" data-cancel="${o.id}">إلغاء الطلب</button>`:''}
+  </section>`);
+  bind();
+  bindRequirementActions({toast,busy,reload:customerDetail});
+  liveChannel=supabase.channel('customer-order-'+id)
+    .on('postgres_changes',{event:'*',schema:'public',table:'order_events',filter:`order_id=eq.${id}`},()=>customerDetail(id))
+    .on('postgres_changes',{event:'UPDATE',schema:'public',table:'orders',filter:`id=eq.${id}`},()=>customerDetail(id))
+    .subscribe();
+}
 function agentAuthChoice(){
   app.innerHTML=shell(`<section class="card narrow agentauth">
     <div class="title"><h2>بوابة الوكيل</h2><button data-go="home">رجوع</button></div>
