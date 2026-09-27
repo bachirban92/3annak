@@ -342,9 +342,9 @@ async function accountPage(){
         </div>`).join('')||'<div class="empty">لا يوجد عنوان محفوظ.</div>'}
       </div>
       <div id="addressEditor"></div>
-    </section>
+    </section>`:''}
 
-    <section class="card account-links">
+    ${isCustomer?`<section class="card account-links">
       <button class="account-link" data-go="payments"><span><b>الدفع</b><small>سجل الدفع وطرق الدفع عند تفعيلها</small></span><span>›</span></button>
       <button class="account-link" data-go="properties"><span><b>عقاراتي</b><small>العقارات المحفوظة لإعادة الطلب بسرعة</small></span><span>›</span></button>
       <button class="account-link" data-go="documents"><span><b>المستندات</b><small>كل المستندات النهائية</small></span><span>›</span></button>
