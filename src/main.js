@@ -95,6 +95,7 @@ async function customerDetail(id){
     supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order')
   ]);
   if(error)return toast(error.message,true);
+  const incompleteRequired=(reqs||[]).filter(r=>r.required&&!r.completed_at);
   app.innerHTML=shell(`<section class="card">
     <div class="title"><h2>${o.public_code}</h2><button data-go="orders">رجوع</button></div>
     <div class="summary">
@@ -103,6 +104,7 @@ async function customerDetail(id){
       <strong>${money(o.total_amount)}</strong>
     </div>
     ${o.status==='completed'?`<div class="completebox"><span class="completecheck">✓</span><div><b>اكتمل الطلب</b><small>مستنداتك جاهزة أدناه.</small></div></div>`:''}
+    ${incompleteRequired.length?`<div class="completebox requirementgate"><span class="completecheck">!</span><div><b>أكمل المعلومات المطلوبة</b><small>لن يظهر الطلب للوكلاء قبل إكمال ${incompleteRequired.length} عنصر مطلوب.</small></div></div>`:''}
     ${(deliverables||[]).length?`<div class="deliverables"><small>المستندات المطلوبة</small><div>${deliverables.map(x=>`<span>${esc(x.service_name_ar)}</span>`).join('')}</div></div>`:''}
     ${renderRequirements(reqs||[])}
     ${o.expected_ready_at&&o.status!=='completed'?`<div class="eta"><small>الوقت المتوقع</small><b>${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}</b></div>`:''}
