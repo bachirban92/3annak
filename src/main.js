@@ -552,13 +552,15 @@ async function customerDetail(id){
     <div class="order-status-card">
       <div><small>الحالة</small><b>${labels[o.status]||o.status}</b></div>
       ${o.expected_ready_at&&o.status!=='completed'? `<div><small>التاريخ المتوقع</small><b>${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}</b></div>`:''}
-      <div><small>الإجمالي</small><b>${money(o.total_amount)}</b></div>
+      <div><small>الإجمالي</small><b>${money(o.total_amount)}</b>${o.delivery_fee>0?`<small>يشمل ${money(o.delivery_fee)} توصيل</small>`:''}</div>
     </div>
 
     <section class="dashboard-panel">
       <div class="order-core-grid">
         <div><small>العقار</small><b>${esc(o.cadastral_area)} • ${esc(o.property_number)}</b></div>
         <div><small>الخدمة</small><b>${(i||[]).map(x=>esc(x.service_name_ar)).join('، ')}</b></div>
+        <div><small>الاستلام</small><b>${o.delivery_mode==='hard_copy'?'نسخة ورقية + إلكترونية':'نسخة إلكترونية'}</b></div>
+        ${o.delivery_mode==='hard_copy'?`<div><small>عنوان التوصيل</small><b>${esc([o.delivery_address_line1,o.delivery_address_line2,o.delivery_city,o.delivery_region].filter(Boolean).join(' • '))}</b></div>`:''}
       </div>
       ${(deliverables||[]).length?`<div class="deliverables compact"><small>المستندات المطلوبة</small><div>${deliverables.map(x=>`<span>${esc(x.service_name_ar)}</span>`).join('')}</div></div>`:''}
     </section>
