@@ -1206,6 +1206,21 @@ function render(){
     return orders();
   }
 
+  if(r==='properties'){
+    if(anonymous||profile?.role!=='customer')return go('home');
+    return customerPropertiesPage();
+  }
+
+  if(r==='documents'){
+    if(anonymous||profile?.role!=='customer')return go('home');
+    return customerDocumentsPage();
+  }
+
+  if(r==='payments'){
+    if(anonymous||profile?.role!=='customer')return go('home');
+    return customerPaymentsPage();
+  }
+
   if(r==='agent'){
     if(anonymous)return agentAuthChoice();
     if(profile?.role==='customer')return agentPortal();
@@ -1223,6 +1238,11 @@ function render(){
     if(!anonymous)return go('home');
     app.innerHTML='';
     return agentRegister();
+  }
+
+  if(r==='agent-earnings'){
+    if(anonymous||profile?.role!=='agent')return go('home');
+    return agentEarningsPage();
   }
 
   if(r==='staff')return go('admin');
