@@ -10,7 +10,7 @@ const workflowStages=[
   ['collected','تم استلام المستند']
 ];
 
-export function renderServicesAdmin(services=[],requirements=[],workflow=[]){
+export function renderServicesAdmin(services=[],requirements=[],workflow=[],bundleItems=[]){
   const create='<form id="newServiceAdmin" class="serviceadmin newservice">'+
     '<div class="serviceadminhead"><span><b>إضافة نوع مستند</b><small>أنشئ خدمة جديدة وحدد السعر والمدة.</small></span></div>'+
     '<div class="servicefields">'+
@@ -28,6 +28,8 @@ export function renderServicesAdmin(services=[],requirements=[],workflow=[]){
     const reqs=requirements.filter(r=>r.service_id===s.id&&r.active);
     const wf=workflow.filter(r=>r.service_id===s.id);
     const active=new Set(wf.filter(x=>x.active).map(x=>x.status));
+    const included=new Set(bundleItems.filter(x=>x.bundle_service_id===s.id).map(x=>x.item_service_id));
+    const bundleChoices=services.filter(x=>x.service_type==='document');
     return '<div class="serviceadmin">'+
       '<div class="serviceadminhead"><span><b>'+esc(s.name_ar)+'</b><small>'+(s.service_type==='bundle'?'حزمة مستندات':'نوع مستند')+'</small></span><i>'+(s.active?'فعّال':'متوقف')+'</i></div>'+
       '<form class="price servicecatalog" data-service-catalog="'+s.id+'">'+
@@ -61,6 +63,13 @@ export function renderServicesAdmin(services=[],requirements=[],workflow=[]){
           '<button class="secondary">إضافة متطلب</button>'+
         '</form>'+
       '</div>'+
+      (s.service_type==='bundle'?'<div class="serviceblock">'+
+        '<div class="serviceblockhead"><b>محتويات الحزمة</b><small>اختر المستندات التي يحصل عليها العميل ضمن هذه الحزمة.</small></div>'+
+        '<form class="bundleadmin" data-bundle-service="'+s.id+'">'+
+          '<div class="bundlechoices">'+bundleChoices.map(i=>'<label><input type="checkbox" name="item" value="'+i.id+'" '+(included.has(i.id)?'checked':'')+'><span>'+esc(i.name_ar)+'</span></label>').join('')+'</div>'+
+          '<button class="secondary">حفظ محتويات الحزمة</button>'+
+        '</form>'+
+      '</div>':'')+
       '<div class="serviceblock">'+
         '<small class="servicelabel">مراحل التنفيذ</small>'+
         '<div class="workflowtoggles">'+workflowStages.map(([status,label])=>
@@ -151,6 +160,20 @@ export function bindServicesAdmin({toast,busy,reload}){
   document.querySelectorAll('[data-disable-req]').forEach(x=>x.onclick=async()=>{
     const {error}=await supabase.rpc('admin_disable_service_requirement',{p_requirement_id:x.dataset.disableReq});
     error?toast(error.message,true):reload();
+  });
+
+  document.querySelectorAll('[data-bundle-service]').forEach(f=>f.onsubmit=async e=>{
+    e.preventDefault();
+    const ids=[...f.querySelectorAll('input[name="item"]:checked')].map(x=>x.value);
+    if(!ids.length)return toast('اختر مستنداً واحداً على الأقل داخل الحزمة',true);
+    const b=f.querySelector('button');
+    busy(b,true);
+    const {error}=await supabase.rpc('admin_replace_bundle_items',{
+      p_bundle_service_id:f.dataset.bundleService,
+      p_item_service_ids:ids
+    });
+    busy(b,false);
+    error?toast(error.message,true):(toast('تم حفظ محتويات الحزمة'),reload());
   });
 
   document.querySelectorAll('[data-workflow-service]').forEach(x=>x.onchange=async()=>{
