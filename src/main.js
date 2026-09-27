@@ -146,19 +146,25 @@ async function agentPortal(){
   }
 
   await supabase.rpc('refresh_agent_dispatch');
-  const [{data:available},{data:mine},{data:completed},{data:coverage},{data:balance}]=await Promise.all([
+  const [{data:available},{data:mine},{data:completed},{data:coverage},{data:balance},{data:notifications}]=await Promise.all([
     supabase.rpc('list_available_orders'),
     supabase.from('orders').select('*').eq('assigned_agent_id',session.user.id).not('status','in','("completed","cancelled")').order('accepted_at',{ascending:false}),
     supabase.from('orders').select('*').eq('assigned_agent_id',session.user.id).eq('status','completed').order('completed_at',{ascending:false}).limit(20),
     supabase.from('agent_coverage').select('*').eq('agent_id',session.user.id).eq('active',true),
-    supabase.rpc('get_agent_balance')
+    supabase.rpc('get_agent_balance'),
+    supabase.from('notifications').select('*').eq('user_id',session.user.id).order('created_at',{ascending:false}).limit(5)
   ]);
   const bal=balance?.[0]||{pending:0,available:0};
 
   app.innerHTML=shell(`<section>
     <div class="agentbar">
-      <div><small>الرصيد المتاح</small><strong>${money(bal.available)}</strong></div>
+      <div class="balancebox">${icon('wallet')}<span><small>الرصيد المتاح</small><strong>${money(bal.available)}</strong></span></div>
       <label class="availability"><input id="agentAvailable" type="checkbox" ${a.available?'checked':''}><span>${a.available?'متاح':'غير متاح'}</span></label>
+    </div>
+    <div class="earningsgrid">
+      <div><small>قيد التنفيذ</small><b>${money(bal.pending)}</b></div>
+      <div><small>متاح</small><b>${money(bal.available)}</b></div>
+      <div><small>مدفوع</small><b>${money(bal.paid)}</b></div>
     </div>
 
     <h3>طلباتي الحالية</h3>
@@ -170,6 +176,12 @@ async function agentPortal(){
       <strong>${money(o.agent_payout)}</strong>
       <button class="primary" data-accept="${o.id}">قبول</button>
     </div>`).join('')||'<div class="empty">لا يوجد طلبات متاحة حالياً.</div>'}</div>
+
+    <h3 class="sectionicon">${icon('check')}<span>طلبات مكتملة</span></h3>
+    <div class="stack">${(completed||[]).map(o=>`<button class="row" data-agent-order="${o.id}"><span><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span><i>تم التسليم</i></button>`).join('')||'<div class="empty">لا يوجد طلبات مكتملة بعد.</div>'}</div>
+
+    <h3 class="sectionicon">${icon('orders')}<span>آخر الإشعارات</span></h3>
+    <div class="stack">${(notifications||[]).map(n=>`<div class="notice ${n.read_at?'':'unread'}"><b>${esc(n.title)}</b><small>${esc(n.body)}</small></div>`).join('')||'<div class="empty">لا يوجد إشعارات.</div>'}</div>
 
     <details class="coverage">
       <summary>مناطق العمل</summary>
@@ -217,6 +229,7 @@ async function agentJob(id){
       <div><small>بدلك</small><b>${money(o.agent_payout)}</b></div>
       <div><small>العميل</small><b>${esc(o.customer_name||'—')}</b></div>
       <div><small>الهاتف</small><a href="tel:${esc(o.customer_phone)}">${esc(o.customer_phone||'—')}</a></div>
+      ${o.expected_ready_at?`<div><small>الوقت المتوقع</small><b>${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}</b></div>`:''}
       ${o.notes?`<div class="wide"><small>ملاحظة</small><b>${esc(o.notes)}</b></div>`:''}
     </div>
 
