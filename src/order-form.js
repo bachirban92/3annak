@@ -72,11 +72,11 @@ export function bindServiceSelection({services,money,toast}){
   const byCode=Object.fromEntries(services.map(s=>[s.code,s]));
 
   const refresh=changed=>{
-    const full=checks.find(x=>x.value==='full_file');
-    if(changed?.value==='full_file'&&changed.checked){
-      checks.forEach(x=>{if(x!==full)x.checked=false});
-    }else if(changed&&changed.value!=='full_file'&&changed.checked&&full){
-      full.checked=false;
+    const changedService=changed?byCode[changed.value]:null;
+    if(changedService?.service_type==='bundle'&&changed.checked){
+      checks.forEach(x=>{if(x!==changed)x.checked=false});
+    }else if(changed&&changed.checked&&changedService?.service_type!=='bundle'){
+      checks.forEach(x=>{if(byCode[x.value]?.service_type==='bundle')x.checked=false});
     }
 
     const selected=checks.filter(x=>x.checked);
