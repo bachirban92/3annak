@@ -875,13 +875,14 @@ async function agentPortal(){
 }
 async function agentJob(id){
   clearLive();
-  const [{data:rows,error},{data:events},{data:docs},{data:deliverables},{data:workflow},{data:requirements}]=await Promise.all([
+  const [{data:rows,error},{data:events},{data:docs},{data:deliverables},{data:workflow},{data:requirements},{data:deliveryOrder}]=await Promise.all([
     supabase.rpc('get_agent_job',{p_order_id:id}),
     supabase.from('order_events').select('*').eq('order_id',id).order('created_at'),
     supabase.from('documents').select('*').eq('order_id',id).order('created_at'),
     supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order'),
     supabase.from('order_workflow_steps').select('*').eq('order_id',id).order('sort_order'),
-    supabase.from('order_requirements').select('*').eq('order_id',id).order('created_at')
+    supabase.from('order_requirements').select('*').eq('order_id',id).order('created_at'),
+    supabase.from('orders').select('delivery_mode,delivery_address_line1,delivery_address_line2,delivery_city,delivery_region,delivery_postal_code,delivery_country,delivery_fee,delivery_agent_payout,hard_copy_delivered_at').eq('id',id).single()
   ]);
   const o=rows?.[0];
   if(error||!o)return toast(error?.message||'تعذر فتح الطلب',true);
@@ -895,11 +896,14 @@ async function agentJob(id){
   const docByDeliverable=Object.fromEntries(finalDocs.map(x=>[x.deliverable_id,x]));
   const docById=Object.fromEntries((docs||[]).map(x=>[x.id,x]));
   const missingDeliverables=(deliverables||[]).filter(x=>!docByDeliverable[x.id]);
+  const hardCopyPending=deliveryOrder?.delivery_mode==='hard_copy'&&!deliveryOrder?.hard_copy_delivered_at;
   const agentAction=!next
     ?{kind:'ok',title:'تم إكمال الطلب',text:'لا يوجد إجراء مطلوب.'}
     :next[0]==='completed'&&missingDeliverables.length
       ?{kind:'action',title:'مطلوب منك الآن',text:`ارفع ${missingDeliverables.length} مستند نهائي قبل إكمال الطلب.`}
-      :{kind:'action',title:'الخطوة التالية',text:next[1]};
+      :next[0]==='completed'&&hardCopyPending
+        ?{kind:'action',title:'مطلوب منك الآن',text:'سلّم النسخة الورقية للعميل ثم أكّد التوصيل.'}
+        :{kind:'action',title:'الخطوة التالية',text:next[1]};
 
   app.innerHTML=shell(`<section class="card order-workspace">
     <div class="title"><h2>${o.public_code}</h2><button data-go="agent">رجوع</button></div>
