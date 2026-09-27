@@ -127,12 +127,37 @@ async function customerPortal(){
     .from('orders').select('*')
     .eq('customer_id',session.user.id)
     .order('created_at',{ascending:false});
-
   if(error)return toast(error.message,true);
 
   const rows=allOrders||[];
   const current=rows.filter(o=>!['completed','cancelled'].includes(o.status));
   const completed=rows.filter(o=>o.status==='completed');
+  const currentIds=current.map(o=>o.id);
+
+  let reqRows=[];
+  if(currentIds.length){
+    const r=await supabase.from('order_requirements')
+      .select('id,order_id,required,completed_at')
+      .in('order_id',currentIds)
+      .eq('required',true);
+    if(r.error)return toast(r.error.message,true);
+    reqRows=r.data||[];
+  }
+
+  const missingByOrder={};
+  for(const r of reqRows){
+    if(!r.completed_at)missingByOrder[r.order_id]=(missingByOrder[r.order_id]||0)+1;
+  }
+  const actionCount=current.filter(o=>(missingByOrder[o.id]||0)>0).length;
+
+  const orderState=o=>{
+    const missing=missingByOrder[o.id]||0;
+    if(missing)return {kind:'action',title:'مطلوب منك',text:`أكمل ${missing} عنصر مطلوب`};
+    if(o.refund_pending)return {kind:'waiting',title:'قيد المعالجة',text:'رد المبلغ قيد المعالجة'};
+    if(o.status==='submitted'&&!o.assigned_agent_id)return {kind:'waiting',title:'بانتظار وكيل',text:'سنظهر الطلب للوكلاء المؤهلين'};
+    if(o.assigned_agent_id&&o.status==='accepted')return {kind:'ok',title:'تم تعيين وكيل',text:'سيبدأ تنفيذ الطلب'};
+    return {kind:'waiting',title:labels[o.status]||o.status,text:o.expected_ready_at?`متوقع ${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}`:''};
+  };
 
   app.innerHTML=shell(`<section class="role-dashboard">
     ${customerNav('home')}
@@ -149,17 +174,27 @@ async function customerPortal(){
 
     <div class="role-metrics">
       <div><small>جارية</small><b>${current.length}</b></div>
+      <div><small>تحتاج إجراء</small><b>${actionCount}</b></div>
       <div><small>مكتملة</small><b>${completed.length}</b></div>
-      <div><small>الإجمالي</small><b>${rows.length}</b></div>
     </div>
+
+    ${actionCount?`<section class="dashboard-panel attention-panel">
+      <div class="dashboard-panel-head"><h3>مطلوب منك</h3></div>
+      <div class="stack">
+        ${current.filter(o=>(missingByOrder[o.id]||0)>0).map(o=>`<button class="action-row" data-order="${o.id}">
+          <span><b>${o.public_code}</b><small>أكمل ${missingByOrder[o.id]} عنصر مطلوب لإرسال الطلب للوكلاء</small></span>
+          <strong>فتح</strong>
+        </button>`).join('')}
+      </div>
+    </section>`:''}
 
     <section class="dashboard-panel">
       <div class="dashboard-panel-head"><h3>الطلبات الجارية</h3><button data-go="orders">عرض الكل</button></div>
       <div class="stack">
-        ${current.slice(0,6).map(o=>`<button class="row" data-order="${o.id}">
-          <span><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span>
-          <i>${labels[o.status]||o.status}</i>
-        </button>`).join('')||'<div class="empty">لا يوجد طلبات جارية.</div>'}
+        ${current.slice(0,8).map(o=>{const st=orderState(o);return `<button class="order-dashboard-row" data-order="${o.id}">
+          <span class="order-dashboard-main"><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span>
+          <span class="order-dashboard-state ${st.kind}"><b>${esc(st.title)}</b><small>${esc(st.text)}</small></span>
+        </button>`}).join('')||'<div class="empty">لا يوجد طلبات جارية.</div>'}
       </div>
     </section>
   </section>`);
@@ -167,6 +202,9 @@ async function customerPortal(){
 
   liveChannel=supabase.channel('customer-dashboard-'+session.user.id)
     .on('postgres_changes',{event:'*',schema:'public',table:'orders',filter:`customer_id=eq.${session.user.id}`},()=>customerPortal())
+    .on('postgres_changes',{event:'*',schema:'public',table:'order_requirements'},payload=>{
+      if(currentIds.includes(payload.new?.order_id||payload.old?.order_id))customerPortal();
+    })
     .subscribe();
 }
 function customerNav(active='home'){
@@ -485,8 +523,28 @@ async function customerDetail(id){
     payment?.status==='refunded'?'تم رد المبلغ':
     payment?.status==='failed'?'فشل الدفع':'بانتظار الدفع';
 
+  const customerAction=incompleteRequired.length
+    ?{kind:'action',title:'مطلوب منك الآن',text:`أكمل ${incompleteRequired.length} عنصر مطلوب ليتم إرسال الطلب للوكلاء.`}
+    :o.refund_pending
+      ?{kind:'waiting',title:'رد المبلغ قيد المعالجة',text:'لا يلزمك أي إجراء حالياً.'}
+      :o.status==='submitted'&&!o.assigned_agent_id
+        ?{kind:'waiting',title:'بانتظار قبول وكيل',text:'طلبك جاهز ويظهر للوكلاء المؤهلين.'}
+        :o.status==='accepted'
+          ?{kind:'ok',title:'تم تعيين وكيل',text:'الوكيل استلم الطلب وسيبدأ التنفيذ.'}
+          :o.status==='completed'
+            ?{kind:'ok',title:'اكتمل الطلب',text:finalDocs.length?'مستنداتك النهائية جاهزة للعرض والتنزيل.':'تم إكمال الطلب.'}
+            :o.status==='cancelled'
+              ?{kind:'waiting',title:'الطلب ملغى',text:o.refund_pending?'رد المبلغ قيد المعالجة.':'لا يوجد إجراء مطلوب.'}
+              :{kind:'waiting',title:labels[o.status]||o.status,text:'لا يلزمك أي إجراء حالياً.'};
+
   app.innerHTML=shell(`<section class="order-detail">
     <div class="title"><div><small>الطلب</small><h2>${o.public_code}</h2></div><button data-go="orders">رجوع</button></div>
+
+    <div class="next-step-card ${customerAction.kind}">
+      <small>الخطوة الحالية</small>
+      <b>${esc(customerAction.title)}</b>
+      <span>${esc(customerAction.text)}</span>
+    </div>
 
     <div class="order-status-card">
       <div><small>الحالة</small><b>${labels[o.status]||o.status}</b></div>
