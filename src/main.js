@@ -843,7 +843,7 @@ async function agentPortal(){
     <section class="dashboard-panel">
       <div class="dashboard-panel-head"><h3>طلبات متاحة</h3></div>
       <div class="stack">${(available||[]).slice(0,8).map(o=>`<div class="job">
-        <span><b>${esc(o.service_names)}</b><small>${esc(o.governorate)} • ${esc(o.cadastral_area)}</small></span>
+        <span><b>${esc(o.service_names)}</b><small>${esc(o.governorate)} • ${esc(o.cadastral_area)}${o.delivery_mode==='hard_copy'?' • توصيل نسخة ورقية':''}</small></span>
         <strong>${money(o.agent_payout)}</strong>
         <button class="primary" data-accept="${o.id}">قبول</button>
       </div>`).join('')||'<div class="empty">لا يوجد طلبات متاحة حالياً.</div>'}</div>
