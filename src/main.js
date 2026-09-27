@@ -312,9 +312,15 @@ async function customerDetail(id){
     ${o.expected_ready_at&&o.status!=='completed'?`<div class="eta"><small>الوقت المتوقع</small><b>${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}</b></div>`:''}
 
     ${o.status==='completed'?`
-      <h3>المستندات</h3>
-      <div class="stack">
-        ${(d||[]).filter(x=>x.kind==='final_document').map(x=>`<button class="download full" data-download="${esc(x.storage_path)}">${esc(x.original_name||'فتح المستند')}</button>`).join('')||'<div class="empty">لا يوجد مستند نهائي مرفوع بعد.</div>'}
+      <h3>المستندات النهائية</h3>
+      <div class="document-list">
+        ${(d||[]).filter(x=>x.kind==='final_document').map(x=>`<div class="document-row">
+          <div><b>${esc(x.original_name||'مستند')}</b><small>${esc(x.mime_type||'')}</small></div>
+          <div class="document-actions">
+            <button class="secondary compact" data-file-view="${esc(x.storage_path)}">عرض</button>
+            <button class="secondary compact" data-file-download="${esc(x.storage_path)}">تنزيل</button>
+          </div>
+        </div>`).join('')||'<div class="empty">لا يوجد مستند نهائي مرفوع بعد.</div>'}
       </div>
 
       <h3>التقييم</h3>
@@ -585,7 +591,7 @@ async function agentJob(id){
           const d=r.document_id?docById[r.document_id]:null;
           return `<div class="requirement done">
             <div><b>${esc(r.label_ar)}</b><small>${r.value_text?esc(r.value_text):(d?esc(d.original_name||'مرفق'):(r.required?'مطلوب':'لم يقدّم'))}</small></div>
-            ${d?`<button class="secondary compact" data-download="${esc(d.storage_path)}">فتح</button>`:'<span class="reqdone">✓</span>'}
+            ${d?`<button class="secondary compact" data-file-view="${esc(d.storage_path)}">عرض</button>`:'<span class="reqdone">✓</span>'}
           </div>`;
         }).join('')}
       </div>`:''}
@@ -596,7 +602,7 @@ async function agentJob(id){
           return `<div class="deliveryitem ${d?'done':''}">
             <div class="deliverylabel"><span class="deliverystatus">${d?'✓':'○'}</span><span><b>${esc(x.service_name_ar)}</b><small>${d?'تم رفع المستند النهائي':'بانتظار المستند النهائي'}</small></span></div>
             <div class="deliveryactions">
-              ${d?`<button class="secondary compact" data-download="${esc(d.storage_path)}">فتح</button>`:''}
+              ${d?`<button class="secondary compact" data-file-view="${esc(d.storage_path)}">عرض</button>`:''}
               <input id="deliverable-file-${x.id}" type="file" accept=".pdf,image/jpeg,image/png,image/webp">
               <button class="secondary compact" data-deliverable-upload="${x.id}" data-order-id="${o.id}" data-old-path="${esc(d?.storage_path||'')}">${d?'استبدال':'رفع'}</button>
             </div>
@@ -1653,10 +1659,28 @@ function bind(){
     agentJob(x.dataset.orderId);
   });
 
-  document.querySelectorAll('[data-download]').forEach(x=>x.onclick=async()=>{
-    const {data,error}=await supabase.storage.from('order-files').download(x.dataset.download);
+  document.querySelectorAll('[data-file-view]').forEach(x=>x.onclick=async()=>{
+    busy(x,true,'جارٍ الفتح...');
+    const {data,error}=await supabase.storage.from('order-files').createSignedUrl(x.dataset.fileView,300);
+    busy(x,false);
     if(error)return toast(error.message,true);
-    const u=URL.createObjectURL(data);window.open(u,'_blank');setTimeout(()=>URL.revokeObjectURL(u),60000);
+    window.location.href=data.signedUrl;
+  });
+
+  document.querySelectorAll('[data-file-download]').forEach(x=>x.onclick=async()=>{
+    busy(x,true,'جارٍ التنزيل...');
+    const {data,error}=await supabase.storage.from('order-files').createSignedUrl(x.dataset.fileDownload,300,{download:true});
+    busy(x,false);
+    if(error)return toast(error.message,true);
+    window.location.href=data.signedUrl;
+  });
+
+  document.querySelectorAll('[data-download]').forEach(x=>x.onclick=async()=>{
+    busy(x,true,'جارٍ الفتح...');
+    const {data,error}=await supabase.storage.from('order-files').createSignedUrl(x.dataset.download,300);
+    busy(x,false);
+    if(error)return toast(error.message,true);
+    window.location.href=data.signedUrl;
   });
 
   document.querySelectorAll('[data-cancel]').forEach(x=>x.onclick=async()=>{
