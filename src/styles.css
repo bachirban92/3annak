@@ -233,3 +233,24 @@ h3{margin:26px 0 11px;font-size:19px}
   .document-actions{width:100%}
   .document-actions button{flex:1}
 }
+
+.order-detail{display:grid;gap:14px;max-width:900px;margin:0 auto}
+.order-detail .title h2{margin:2px 0 0}
+.order-detail .title small{color:var(--muted)}
+.order-status-card{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.order-status-card>div{display:grid;gap:4px;border:1px solid var(--line);border-radius:14px;background:#fff;padding:14px}
+.order-status-card small,.order-core-grid small{color:var(--muted)}
+.order-status-card b{font-size:18px}
+.order-core-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.order-core-grid>div{display:grid;gap:4px}
+.order-section{border:1px solid var(--line);border-radius:14px;background:#fff;overflow:hidden}
+.order-section summary{padding:14px;cursor:pointer;font-weight:800}
+.order-section[open] summary{border-bottom:1px solid var(--line)}
+.order-section-body{padding:14px}
+.deliverables.compact{margin-top:12px}
+.coverage-account{display:grid;gap:8px;margin-top:12px}
+@media(max-width:620px){
+  .order-status-card{grid-template-columns:1fr 1fr}
+  .order-status-card>div:last-child{grid-column:1/-1}
+  .order-core-grid{grid-template-columns:1fr}
+}
