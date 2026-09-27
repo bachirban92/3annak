@@ -135,6 +135,7 @@ async function customerPortal(){
   const completed=rows.filter(o=>o.status==='completed');
 
   app.innerHTML=shell(`<section class="role-dashboard">
+    ${customerNav('home')}
     <div class="role-dashboard-bar">
       <div><small>حساب العميل</small><h2>${esc(profile?.full_name||session?.user?.email||'')}</h2></div>
       <button class="ghost" data-customer-logout>تسجيل الخروج</button>
@@ -430,7 +431,8 @@ async function orders(){
   clearLive();
   const {data,error}=await supabase.from('orders').select('*').eq('customer_id',session.user.id).order('created_at',{ascending:false});
   if(error)return toast(error.message,true);
-  app.innerHTML=shell(`<section>
+  app.innerHTML=shell(`<section class="role-dashboard">
+    ${customerNav('orders')}
     <div class="title"><h2>طلباتي</h2><button data-go="customer">رجوع</button></div>
     <div class="stack">${(data||[]).map(o=>`<button class="row" data-order="${o.id}"><span><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span><i>${labels[o.status]||o.status}</i></button>`).join('')||'<div class="empty">لا يوجد طلبات.</div>'}</div>
     <button class="primary full" data-go="new">طلب جديد</button>
@@ -690,6 +692,7 @@ async function agentPortal(){
   const bal=balance?.[0]||{pending:0,available:0};
 
   app.innerHTML=shell(`<section class="role-dashboard">
+    ${agentNav('home')}
     <div class="role-dashboard-bar">
       <div><small>حساب الوكيل</small><h2>${esc(profile?.full_name||session?.user?.email||'')}</h2></div>
       <div class="agentbar-actions">
