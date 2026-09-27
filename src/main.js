@@ -85,13 +85,14 @@ async function orders(){
 }
 async function customerDetail(id){
   clearLive();
-  const [{data:o,error},{data:e},{data:d},{data:i},{data:reqs},{data:feedback}]=await Promise.all([
+  const [{data:o,error},{data:e},{data:d},{data:i},{data:reqs},{data:feedback},{data:deliverables}]=await Promise.all([
     supabase.from('orders').select('*').eq('id',id).single(),
     supabase.from('order_events').select('*').eq('order_id',id).order('created_at'),
     supabase.from('documents').select('*').eq('order_id',id).eq('visible_to_customer',true).order('created_at'),
     supabase.from('order_items').select('*').eq('order_id',id),
     supabase.from('order_requirements').select('*').eq('order_id',id).order('created_at'),
-    supabase.rpc('get_order_feedback',{p_order_id:id})
+    supabase.rpc('get_order_feedback',{p_order_id:id}),
+    supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order')
   ]);
   if(error)return toast(error.message,true);
   app.innerHTML=shell(`<section class="card">
@@ -102,6 +103,7 @@ async function customerDetail(id){
       <strong>${money(o.total_amount)}</strong>
     </div>
     ${o.status==='completed'?`<div class="completebox"><span class="completecheck">✓</span><div><b>اكتمل الطلب</b><small>مستنداتك جاهزة أدناه.</small></div></div>`:''}
+    ${(deliverables||[]).length?`<div class="deliverables"><small>المستندات المطلوبة</small><div>${deliverables.map(x=>`<span>${esc(x.service_name_ar)}</span>`).join('')}</div></div>`:''}
     ${renderRequirements(reqs||[])}
     ${o.expected_ready_at&&o.status!=='completed'?`<div class="eta"><small>الوقت المتوقع</small><b>${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}</b></div>`:''}
 
@@ -305,10 +307,11 @@ async function agentPortal(){
 }
 async function agentJob(id){
   clearLive();
-  const [{data:rows,error},{data:events},{data:docs}]=await Promise.all([
+  const [{data:rows,error},{data:events},{data:docs},{data:deliverables}]=await Promise.all([
     supabase.rpc('get_agent_job',{p_order_id:id}),
     supabase.from('order_events').select('*').eq('order_id',id).order('created_at'),
-    supabase.from('documents').select('*').eq('order_id',id).order('created_at')
+    supabase.from('documents').select('*').eq('order_id',id).order('created_at'),
+    supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order')
   ]);
   const o=rows?.[0];
   if(error||!o)return toast(error?.message||'تعذر فتح الطلب',true);
@@ -333,6 +336,8 @@ async function agentJob(id){
       ${o.expected_ready_at?`<div><small>الوقت المتوقع</small><b>${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}</b></div>`:''}
       ${o.notes?`<div class="wide"><small>ملاحظة</small><b>${esc(o.notes)}</b></div>`:''}
     </div>
+
+    ${(deliverables||[]).length?`<h3>المطلوب تسليمه</h3><div class="deliverables agentdeliverables"><div>${deliverables.map(x=>`<span>${esc(x.service_name_ar)}</span>`).join('')}</div></div>`:''}
 
     <h3>التتبّع</h3>
     <div class="timeline">${(events||[]).map(x=>`<div><b>${esc(x.label_ar)}</b><small>${new Date(x.created_at).toLocaleString('ar-LB')}</small></div>`).join('')}</div>
