@@ -266,6 +266,24 @@ async function agentJob(id){
     .on('postgres_changes',{event:'*',schema:'public',table:'order_events',filter:`order_id=eq.${id}`},()=>agentJob(id))
     .subscribe();
 }
+async function staffAccess(){
+  clearLive();
+  if(profile?.role==='admin'){
+    go('admin');
+    return;
+  }
+
+  app.innerHTML=shell(`<section class="card narrow stafflogin">
+    <div class="title"><h2>دخول الإدارة</h2><button data-go="home">رجوع</button></div>
+    <form id="staffLogin">
+      <input name="email" type="email" autocomplete="email" required placeholder="البريد الإلكتروني">
+      <button class="primary full">إرسال رابط الدخول</button>
+    </form>
+    <small class="staffhint">الدخول متاح فقط للحساب الإداري المعتمد.</small>
+  </section>`);
+  bind();
+}
+
 async function admin(){
   clearLive();
   if(profile?.role!=='admin')return go('home');
@@ -357,6 +375,7 @@ function render(){
   if(r==='new')app.innerHTML=newOrder();
   else if(r==='orders')return orders();
   else if(r==='agent')return agentPortal();
+  else if(r==='staff')return staffAccess();
   else if(r==='admin')return admin();
   else if(r.startsWith('admin-order/'))return adminOrder(r.split('/')[1]);
   else app.innerHTML=home();
@@ -364,6 +383,24 @@ function render(){
 }
 function bind(){
   document.querySelectorAll('[data-go]').forEach(x=>x.onclick=()=>go(x.dataset.go));
+
+  const staffLogin=document.querySelector('#staffLogin');
+  if(staffLogin)staffLogin.onsubmit=async e=>{
+    e.preventDefault();
+    const fd=new FormData(staffLogin),email=String(fd.get('email')||'').trim().toLowerCase();
+    const b=staffLogin.querySelector('button');
+    if(email!=='bachir.ban@gmail.com')return toast('هذا البريد غير مخوّل للإدارة.',true);
+    busy(b,true,'جارٍ الإرسال...');
+    await supabase.auth.signOut();
+    const redirect=new URL('./#staff',location.href).href;
+    const {error}=await supabase.auth.signInWithOtp({
+      email,
+      options:{emailRedirectTo:redirect,shouldCreateUser:true}
+    });
+    busy(b,false);
+    if(error)return toast(error.message,true);
+    staffLogin.innerHTML='<div class="loginSent"><b>تم إرسال رابط الدخول.</b><small>افتح بريدك واضغط الرابط للمتابعة.</small></div>';
+  };
 
   const order=document.querySelector('#order');
   if(order)order.onsubmit=async e=>{
