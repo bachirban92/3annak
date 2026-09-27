@@ -112,3 +112,9 @@ h3{margin:26px 0 11px;font-size:19px}
 .reqchips>small{color:var(--muted)}
 .eta{display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin:14px 0 18px}
 .eta small{color:var(--muted)}
+
+.agentbar-actions{display:flex;align-items:center;gap:10px}
+.agentauth .secondary{margin-top:10px}
+.staffhint{display:block;color:var(--muted);margin-top:12px;text-align:center}
+.loginSent{display:grid;gap:6px;text-align:center;padding:18px}
+@media(max-width:620px){.agentbar-actions{align-items:flex-end;flex-direction:column}}
