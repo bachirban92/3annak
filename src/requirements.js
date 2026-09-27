@@ -8,10 +8,11 @@ export function renderRequirements(reqs=[]){
     if(r.completed_at){
       return '<div class="requirement done"><div><b>'+esc(r.label_ar)+'</b><small>تم</small></div><span class="reqdone">✓</span></div>';
     }
+    const reqLabel=r.required?'مطلوب':'اختياري';
     if(r.requirement_type==='file'){
-      return '<div class="requirement"><div><b>'+esc(r.label_ar)+'</b><small>مطلوب</small></div><input type="file" id="req-file-'+r.id+'" accept=".pdf,image/*"><button class="secondary compact" data-req-upload="'+r.id+'" data-order-id="'+r.order_id+'">رفع</button></div>';
+      return '<div class="requirement"><div><b>'+esc(r.label_ar)+'</b><small>'+reqLabel+'</small></div><input type="file" id="req-file-'+r.id+'" accept=".pdf,image/*"><button class="secondary compact" data-req-upload="'+r.id+'" data-order-id="'+r.order_id+'">رفع</button></div>';
     }
-    return '<div class="requirement"><div><b>'+esc(r.label_ar)+'</b><small>مطلوب</small></div><input id="req-text-'+r.id+'" placeholder="'+esc(r.label_ar)+'"><button class="secondary compact" data-req-save="'+r.id+'" data-order-id="'+r.order_id+'">حفظ</button></div>';
+    return '<div class="requirement"><div><b>'+esc(r.label_ar)+'</b><small>'+reqLabel+'</small></div><input id="req-text-'+r.id+'" placeholder="'+esc(r.label_ar)+'"><button class="secondary compact" data-req-save="'+r.id+'" data-order-id="'+r.order_id+'">حفظ</button></div>';
   }).join('')+'</div>';
 }
 
