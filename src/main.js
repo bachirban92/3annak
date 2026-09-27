@@ -297,22 +297,30 @@ async function accountPage(){
   if(isAnonymousUser())return go('home');
 
   const isAgent=profile?.role==='agent';
-  const agent=isAgent
-    ?(await supabase.from('agent_profiles').select('verification_status,completed_orders,rating,available').eq('user_id',session.user.id).maybeSingle()).data
-    :null;
-  const coverage=isAgent
-    ?(await supabase.from('agent_coverage').select('governorate,district').eq('agent_id',session.user.id).eq('active',true)).data||[]
-    :[];
+  const isCustomer=profile?.role==='customer';
 
-  const roleLabel=isAgent?'وكيل':profile?.role==='customer'?'عميل':'إدارة';
+  const [agentRes,coverageRes,addressRes,payoutRes]=await Promise.all([
+    isAgent?supabase.from('agent_profiles').select('*').eq('user_id',session.user.id).maybeSingle():Promise.resolve({data:null}),
+    isAgent?supabase.from('agent_coverage').select('*').eq('agent_id',session.user.id).eq('active',true):Promise.resolve({data:[]}),
+    isCustomer?supabase.from('customer_addresses').select('*').order('is_default',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]}),
+    isAgent?supabase.from('agent_payout_accounts').select('*').eq('user_id',session.user.id).maybeSingle():Promise.resolve({data:null})
+  ]);
+
+  const agent=agentRes.data;
+  const coverage=coverageRes.data||[];
+  const addresses=addressRes.data||[];
+  const payout=payoutRes.data;
+
   app.innerHTML=shell(`<section class="accountpage">
+    ${isCustomer?customerNav('account'):isAgent?agentNav('account'):''}
+
     <div class="title">
-      <div><h2>حسابي</h2><small>${roleLabel}</small></div>
+      <div><h2>حسابي</h2><small>${isAgent?'وكيل':isCustomer?'عميل':'إدارة'}</small></div>
       <button data-go="home">رجوع</button>
     </div>
 
     <section class="card">
-      <h3>معلومات الحساب</h3>
+      <h3>المعلومات الشخصية</h3>
       <form id="accountProfileForm">
         <label>الاسم<input name="name" required value="${esc(profile?.full_name||'')}"></label>
         <label>رقم الهاتف<input name="phone" value="${esc(profile?.phone||'')}"></label>
@@ -321,23 +329,62 @@ async function accountPage(){
       </form>
     </section>
 
+    ${isCustomer?`<section class="card">
+      <div class="dashboard-panel-head"><h3>العناوين</h3><button class="secondary compact" data-add-address>إضافة عنوان</button></div>
+      <div class="stack">
+        ${addresses.map(a=>`<div class="account-list-row">
+          <div><b>${esc(a.label)}</b><small>${esc(a.address_line1)} • ${esc(a.city)}${a.is_default?' • افتراضي':''}</small></div>
+          <div class="row-actions">
+            <button class="secondary compact" data-edit-address="${a.id}">تعديل</button>
+            <button class="secondary compact" data-delete-address="${a.id}">حذف</button>
+          </div>
+        </div>`).join('')||'<div class="empty">لا يوجد عنوان محفوظ.</div>'}
+      </div>
+      <div id="addressEditor"></div>
+    </section>
+
+    <section class="card account-links">
+      <button class="account-link" data-go="payments"><span><b>الدفع</b><small>سجل الدفع وطرق الدفع عند تفعيلها</small></span><span>›</span></button>
+      <button class="account-link" data-go="properties"><span><b>عقاراتي</b><small>العقارات المحفوظة لإعادة الطلب بسرعة</small></span><span>›</span></button>
+      <button class="account-link" data-go="documents"><span><b>المستندات</b><small>كل المستندات النهائية</small></span><span>›</span></button>
+    </section>`:''}
+
     ${isAgent?`<section class="card">
-      <h3>حساب الوكيل</h3>
+      <h3>التحقق</h3>
       <div class="accountfacts">
         <div><small>حالة الحساب</small><b>${agent?.verification_status==='approved'?'معتمد':agent?.verification_status==='pending'?'قيد المراجعة':agent?.verification_status==='suspended'?'موقوف':'غير معتمد'}</b></div>
         <div><small>طلبات مكتملة</small><b>${agent?.completed_orders||0}</b></div>
-        <div><small>مناطق العمل</small><b>${coverage.length||0}</b></div>
+        <div><small>التقييم</small><b>${agent?.rating??'—'}</b></div>
       </div>
+    </section>
+
+    <section class="card">
+      <h3>مناطق العمل</h3>
       <small class="accountmuted">${coverage.map(x=>esc(x.governorate)+(x.district?' / '+esc(x.district):'')).join('، ')||'لا توجد مناطق عمل.'}</small>
       <form id="coverage" class="coverage-account">
         <select name="governorate" required><option value="">المحافظة</option>${gov.map(x=>`<option>${x}</option>`).join('')}</select>
         <input name="district" placeholder="القضاء (اختياري)">
         <button class="secondary full">تحديث منطقة العمل</button>
       </form>
+    </section>
+
+    <section class="card">
+      <h3>الحساب البنكي</h3>
+      <form id="payoutAccountForm">
+        <label>اسم صاحب الحساب<input name="account_holder" required value="${esc(payout?.account_holder||profile?.full_name||'')}"></label>
+        <label>اسم البنك<input name="bank_name" value="${esc(payout?.bank_name||'')}"></label>
+        <label>IBAN<input name="iban" required autocomplete="off" value="${esc(payout?.iban||'')}"></label>
+        ${payout?`<small class="accountmuted">${payout.is_verified?'تم التحقق من الحساب':'سيحتاج أي تعديل إلى مراجعة الإدارة.'}</small>`:''}
+        <button class="primary full">حفظ بيانات التحويل</button>
+      </form>
+    </section>
+
+    <section class="card account-links">
+      <button class="account-link" data-go="agent-earnings"><span><b>الأرباح والدفعات</b><small>الحركات والرصيد والدفعات</small></span><span>›</span></button>
     </section>`:''}
 
     <section class="card">
-      <h3>تغيير كلمة المرور</h3>
+      <h3>الأمان</h3>
       <form id="accountPasswordForm">
         <input name="password" type="password" minlength="8" autocomplete="new-password" required placeholder="كلمة المرور الجديدة">
         <input name="confirm" type="password" minlength="8" autocomplete="new-password" required placeholder="تأكيد كلمة المرور">
