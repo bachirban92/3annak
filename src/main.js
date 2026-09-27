@@ -940,7 +940,7 @@ function bind(){
     });
     busy(b,false);
     error?toast(error.message,true):(toast(action==='resolved'?'تم حل طلب الدعم':'تم إغلاق طلب الدعم'),adminDispute(disputeResolution.dataset.disputeId));
-  });
+  };
 
   const adminStatus=document.querySelector('#adminStatusForm');
   if(adminStatus)adminStatus.onsubmit=async e=>{
