@@ -214,16 +214,23 @@ export function bindServiceSelection({services,bundleItems,serviceRequirements,s
   };
 
   const savedPropertySelect=form.querySelector('#savedPropertySelect');
-  if(savedPropertySelect)savedPropertySelect.onchange=()=>{
-    const p=savedProperties.find(x=>x.id===savedPropertySelect.value);
-    if(!p)return;
-    form.elements.governorate.value=p.governorate||'';
-    form.elements.district.value=p.district||'';
-    form.elements.cadastral_area.value=p.cadastral_area||'';
-    form.elements.property_number.value=p.property_number||'';
-    form.elements.property_section.value=p.property_section||'';
-    updateReview();
-  };
+  if(savedPropertySelect){
+    savedPropertySelect.onchange=()=>{
+      const p=savedProperties.find(x=>x.id===savedPropertySelect.value);
+      if(!p)return;
+      form.elements.governorate.value=p.governorate||'';
+      form.elements.district.value=p.district||'';
+      form.elements.cadastral_area.value=p.cadastral_area||'';
+      form.elements.property_number.value=p.property_number||'';
+      form.elements.property_section.value=p.property_section||'';
+      updateReview();
+    };
+    const def=savedProperties.find(x=>x.is_default);
+    if(def){
+      savedPropertySelect.value=def.id;
+      savedPropertySelect.onchange();
+    }
+  }
 
   checks.forEach(x=>x.addEventListener('change',()=>refresh(x)));
   form.addEventListener('input',updateReview);
