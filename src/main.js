@@ -544,12 +544,13 @@ async function agentPortal(){
 }
 async function agentJob(id){
   clearLive();
-  const [{data:rows,error},{data:events},{data:docs},{data:deliverables},{data:workflow}]=await Promise.all([
+  const [{data:rows,error},{data:events},{data:docs},{data:deliverables},{data:workflow},{data:requirements}]=await Promise.all([
     supabase.rpc('get_agent_job',{p_order_id:id}),
     supabase.from('order_events').select('*').eq('order_id',id).order('created_at'),
     supabase.from('documents').select('*').eq('order_id',id).order('created_at'),
     supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order'),
-    supabase.from('order_workflow_steps').select('*').eq('order_id',id).order('sort_order')
+    supabase.from('order_workflow_steps').select('*').eq('order_id',id).order('sort_order'),
+    supabase.from('order_requirements').select('*').eq('order_id',id).order('created_at')
   ]);
   const o=rows?.[0];
   if(error||!o)return toast(error?.message||'تعذر فتح الطلب',true);
@@ -561,6 +562,7 @@ async function agentJob(id){
       :['completed','إكمال الطلب'];
   const finalDocs=(docs||[]).filter(x=>x.kind==='final_document'&&x.deliverable_id);
   const docByDeliverable=Object.fromEntries(finalDocs.map(x=>[x.deliverable_id,x]));
+  const docById=Object.fromEntries((docs||[]).map(x=>[x.id,x]));
   const missingDeliverables=(deliverables||[]).filter(x=>!docByDeliverable[x.id]);
 
   app.innerHTML=shell(`<section class="card">
@@ -576,6 +578,16 @@ async function agentJob(id){
       ${o.notes?`<div class="wide"><small>ملاحظة</small><b>${esc(o.notes)}</b></div>`:''}
     </div>
 
+    ${(requirements||[]).length?`<h3>معلومات العميل</h3>
+      <div class="requirements agentrequirements">
+        ${(requirements||[]).map(r=>{
+          const d=r.document_id?docById[r.document_id]:null;
+          return `<div class="requirement done">
+            <div><b>${esc(r.label_ar)}</b><small>${r.value_text?esc(r.value_text):(d?esc(d.original_name||'مرفق'):(r.required?'مطلوب':'لم يقدّم'))}</small></div>
+            ${d?`<button class="secondary compact" data-download="${esc(d.storage_path)}">فتح</button>`:'<span class="reqdone">✓</span>'}
+          </div>`;
+        }).join('')}
+      </div>`:''}
     ${(deliverables||[]).length?`<h3>المطلوب تسليمه</h3>
       <div class="deliverychecklist">
         ${deliverables.map(x=>{
