@@ -954,10 +954,10 @@ function render(){
   }
 
   if(r==='staff')return staffAccess();
-  if(r==='admin')return profile?.role==='admin'?admin():go('home');
-  if(r.startsWith('admin-dispute/'))return profile?.role==='admin'?adminDispute(r.split('/')[1]):go('home');
-  if(r.startsWith('admin-agent/'))return profile?.role==='admin'?adminAgent(r.split('/')[1]):go('home');
-  if(r.startsWith('admin-order/'))return profile?.role==='admin'?adminOrder(r.split('/')[1]):go('home');
+  if(r==='admin')return profile?.role==='admin'?admin():staffAccess();
+  if(r.startsWith('admin-dispute/'))return profile?.role==='admin'?adminDispute(r.split('/')[1]):staffAccess();
+  if(r.startsWith('admin-agent/'))return profile?.role==='admin'?adminAgent(r.split('/')[1]):staffAccess();
+  if(r.startsWith('admin-order/'))return profile?.role==='admin'?adminOrder(r.split('/')[1]):staffAccess();
 
   return go('home');
 }
