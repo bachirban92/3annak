@@ -44,12 +44,21 @@ export function renderServicesAdmin(services=[],requirements=[],workflow=[]){
         '<button class="secondary">حفظ الخدمة</button>'+
       '</form>'+
       '<div class="serviceblock">'+
-        '<small class="servicelabel">متطلبات العميل</small>'+
-        '<div class="reqchips">'+(reqs.length?reqs.map(r=>'<span>'+esc(r.label_ar)+' <button type="button" data-disable-req="'+r.id+'">×</button></span>').join(''):'<small>لا توجد متطلبات.</small>')+'</div>'+
+        '<div class="serviceblockhead"><b>متطلبات العميل</b><small>ما يجب إدخاله أو رفعه قبل إرسال الطلب للوكيل.</small></div>'+
+        '<div class="requirementadminlist">'+(reqs.length?reqs.map(r=>
+          '<form class="requirementadminrow" data-requirement="'+r.id+'">'+
+            '<input name="label" value="'+esc(r.label_ar)+'" required>'+
+            '<select name="type"><option value="text" '+(r.requirement_type==='text'?'selected':'')+'>معلومة</option><option value="file" '+(r.requirement_type==='file'?'selected':'')+'>ملف</option></select>'+
+            '<label class="check compactcheck"><input name="required" type="checkbox" '+(r.required?'checked':'')+'> مطلوب</label>'+
+            '<button class="secondary compact">حفظ</button>'+
+            '<button type="button" class="ghost compact" data-disable-req="'+r.id+'">حذف</button>'+
+          '</form>'
+        ).join(''):'<div class="empty small">لا توجد متطلبات.</div>')+'</div>'+
         '<form class="reqadmin" data-req-service="'+s.id+'">'+
-          '<input name="label" placeholder="متطلب جديد">'+
-          '<select name="type"><option value="file">ملف</option><option value="text">معلومة</option></select>'+
-          '<button class="secondary">إضافة</button>'+
+          '<input name="label" placeholder="متطلب جديد" required>'+
+          '<select name="type"><option value="text">معلومة</option><option value="file">ملف</option></select>'+
+          '<label class="check compactcheck"><input name="required" type="checkbox" checked> مطلوب</label>'+
+          '<button class="secondary">إضافة متطلب</button>'+
         '</form>'+
       '</div>'+
       '<div class="serviceblock">'+
@@ -63,19 +72,48 @@ export function renderServicesAdmin(services=[],requirements=[],workflow=[]){
 }
 
 export function bindServicesAdmin({toast,busy,reload}){
-  document.querySelectorAll('[data-service]').forEach(f=>f.onsubmit=async e=>{
+  const create=document.querySelector('#newServiceAdmin');
+  if(create)create.onsubmit=async e=>{
     e.preventDefault();
-    const d=new FormData(f),b=f.querySelector('button');
+    const d=new FormData(create),b=create.querySelector('button');
+    const min=d.get('eta_min')===''?null:+d.get('eta_min');
+    const max=d.get('eta_max')===''?null:+d.get('eta_max');
+    if(min!==null&&max!==null&&max<min)return toast('المدة القصوى يجب أن تكون أكبر أو مساوية للمدة الدنيا',true);
     busy(b,true);
-    const {error}=await supabase.rpc('admin_update_service',{
-      p_service_id:f.dataset.service,
-      p_customer_price:+d.get('cp'),
-      p_agent_payout:+d.get('ap'),
-      p_active:d.get('active')==='on',
-      p_official_fee:+d.get('official_fee')||0
+    const {error}=await supabase.rpc('admin_create_service',{
+      p_name_ar:String(d.get('name')||'').trim(),
+      p_description_ar:String(d.get('description')||'').trim(),
+      p_customer_price:+d.get('cp')||0,
+      p_official_fee:+d.get('official_fee')||0,
+      p_agent_payout:+d.get('ap')||0,
+      p_expected_days_min:min,
+      p_expected_days_max:max,
+      p_active:true
     });
     busy(b,false);
-    error?toast(error.message,true):(toast('تم الحفظ'),reload());
+    error?toast(error.message,true):(toast('تمت إضافة نوع المستند'),reload());
+  };
+
+  document.querySelectorAll('[data-service-catalog]').forEach(f=>f.onsubmit=async e=>{
+    e.preventDefault();
+    const d=new FormData(f),b=f.querySelector('button');
+    const min=d.get('eta_min')===''?null:+d.get('eta_min');
+    const max=d.get('eta_max')===''?null:+d.get('eta_max');
+    if(min!==null&&max!==null&&max<min)return toast('المدة القصوى يجب أن تكون أكبر أو مساوية للمدة الدنيا',true);
+    busy(b,true);
+    const {error}=await supabase.rpc('admin_update_service_catalog',{
+      p_service_id:f.dataset.serviceCatalog,
+      p_name_ar:String(d.get('name')||'').trim(),
+      p_description_ar:String(d.get('description')||'').trim(),
+      p_customer_price:+d.get('cp')||0,
+      p_official_fee:+d.get('official_fee')||0,
+      p_agent_payout:+d.get('ap')||0,
+      p_expected_days_min:min,
+      p_expected_days_max:max,
+      p_active:d.get('active')==='on'
+    });
+    busy(b,false);
+    error?toast(error.message,true):(toast('تم حفظ الخدمة'),reload());
   });
 
   document.querySelectorAll('[data-req-service]').forEach(f=>f.onsubmit=async e=>{
@@ -89,10 +127,25 @@ export function bindServicesAdmin({toast,busy,reload}){
       p_code:'req_'+Date.now(),
       p_label_ar:label,
       p_requirement_type:d.get('type'),
-      p_required:true
+      p_required:d.get('required')==='on'
     });
     busy(b,false);
     error?toast(error.message,true):(toast('تمت إضافة المتطلب'),reload());
+  });
+
+  document.querySelectorAll('[data-requirement]').forEach(f=>f.onsubmit=async e=>{
+    e.preventDefault();
+    const d=new FormData(f),b=f.querySelector('button:not([type="button"])');
+    busy(b,true);
+    const {error}=await supabase.rpc('admin_update_service_requirement',{
+      p_requirement_id:f.dataset.requirement,
+      p_label_ar:String(d.get('label')||'').trim(),
+      p_requirement_type:d.get('type'),
+      p_required:d.get('required')==='on',
+      p_active:true
+    });
+    busy(b,false);
+    error?toast(error.message,true):(toast('تم حفظ المتطلب'),reload());
   });
 
   document.querySelectorAll('[data-disable-req]').forEach(x=>x.onclick=async()=>{
