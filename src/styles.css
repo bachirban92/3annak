@@ -122,3 +122,12 @@ h3{margin:26px 0 11px;font-size:19px}
 .agentprofilecard{display:grid;gap:14px}
 .adminagentactions{display:flex;justify-content:flex-end;gap:8px}
 @media(max-width:620px){.adminagentactions{justify-content:stretch}.adminagentactions button{width:100%}}
+
+.agentverifylist{display:grid;gap:10px;margin-top:16px}
+.verifyitem{display:grid;grid-template-columns:1fr minmax(150px,auto) auto;gap:10px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px}
+.verifyitem>div{display:grid;gap:3px}
+.verifyitem small{color:var(--muted)}
+.verifiedmark{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#111;color:#fff;font-weight:900}
+.verifyadmin{align-items:center}
+.verifyactions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:620px){.verifyitem{grid-template-columns:1fr}.verifyactions{justify-content:flex-start}}
