@@ -6,6 +6,7 @@ import { renderNewOrder, bindServiceSelection } from './order-form.js';
 
 const app=document.querySelector('#app');
 let session=null,profile=null,services=[],bundleItems=[],serviceRequirements=[],paymentsEnabled=false,liveChannel=null;
+let passwordRecoveryMode=location.hash.includes('type=recovery')||new URLSearchParams(location.search).get('password-reset')==='1';
 
 const labels={
   submitted:'تم استلام الطلب',
@@ -879,7 +880,7 @@ function render(){
   const r=location.hash.slice(1)||'home';
   const anonymous=isAnonymousUser();
 
-  if(new URLSearchParams(location.search).get('password-reset')==='1'&&!anonymous){
+  if(passwordRecoveryMode&&!anonymous){
     return resetPasswordPage();
   }
 
@@ -955,6 +956,7 @@ function render(){
 
   if(r==='staff')return go('admin');
   if(r==='admin')return profile?.role==='admin'?admin():adminAccess();
+  if(r.startsWith('admin/')&&profile?.role==='admin')return admin(r.split('/')[1]);
   if(r.startsWith('admin-dispute/'))return profile?.role==='admin'?adminDispute(r.split('/')[1]):adminAccess();
   if(r.startsWith('admin-agent/'))return profile?.role==='admin'?adminAgent(r.split('/')[1]):adminAccess();
   if(r.startsWith('admin-order/'))return profile?.role==='admin'?adminOrder(r.split('/')[1]):adminAccess();
@@ -1118,10 +1120,13 @@ function bind(){
     const {error}=await supabase.auth.updateUser({password});
     busy(b,false);
     if(error)return toast(error.message,true);
+    passwordRecoveryMode=false;
     history.replaceState(null,'',location.pathname);
     toast('تم تغيير كلمة المرور');
     await load();
-    go('home');
+    if(profile?.role==='admin')return go('admin');
+    if(profile?.role==='agent')return go('agent');
+    return go('customer');
   };
 
   document.querySelectorAll('[data-resend-agent-confirm]').forEach(x=>x.onclick=async()=>{
@@ -1680,6 +1685,16 @@ async function agentStatus(id,status){
 }
 
 window.addEventListener('hashchange',render);
+
+supabase.auth.onAuthStateChange((event)=>{
+  if(event==='PASSWORD_RECOVERY'){
+    passwordRecoveryMode=true;
+    setTimeout(async()=>{
+      await load();
+      resetPasswordPage();
+    },0);
+  }
+});
 
 try {
   await load();
