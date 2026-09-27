@@ -393,6 +393,30 @@ async function agentPortal(){
   clearLive();
 
   if(isAnonymousUser())return agentAuthChoice();
+
+  const requestedAgent=session?.user?.user_metadata?.requested_role==='agent';
+  if(profile?.role==='customer'&&requestedAgent){
+    const meta=session.user.user_metadata||{};
+    const applied=await supabase.rpc('apply_as_agent');
+    if(applied.error)return toast(applied.error.message,true);
+
+    if(meta.full_name||meta.phone){
+      await supabase.rpc('update_my_profile',{
+        p_full_name:String(meta.full_name||profile?.full_name||''),
+        p_phone:String(meta.phone||profile?.phone||''),
+        p_locale:'ar',
+        p_email:session?.user?.email||''
+      });
+    }
+    if(meta.governorate){
+      await supabase.rpc('replace_agent_coverage',{
+        p_governorate:String(meta.governorate),
+        p_district:String(meta.district||'')
+      });
+    }
+    await load();
+  }
+
   if(profile?.role==='customer'){
     app.innerHTML=shell(`<section class="card narrow">
       <h2>أنت داخل كعميل</h2>
@@ -982,7 +1006,7 @@ function bind(){
       email,
       password,
       options:{
-        data:{full_name:String(f.get('name')||''),phone:String(f.get('phone')||'')},
+        data:{full_name:String(f.get('name')||''),phone:String(f.get('phone')||''),requested_role:'customer'},
         emailRedirectTo:'https://bachirban92.github.io/3annak/#customer'
       }
     });
@@ -1123,8 +1147,13 @@ function bind(){
     }
     session=data.session;
     await load();
+    if(profile?.role==='customer'&&session?.user?.user_metadata?.requested_role!=='agent'){
+      busy(b,false);
+      toast('هذا حساب عميل',true);
+      return go('customer');
+    }
     toast('تم تسجيل الدخول');
-    go('home');
+    go('agent');
   };
 
   const agentRegisterForm=document.querySelector('#agentRegister');
@@ -1140,7 +1169,13 @@ function bind(){
       email,
       password,
       options:{
-        data:{full_name:String(f.get('name')||''),phone:String(f.get('phone')||'')},
+        data:{
+          full_name:String(f.get('name')||''),
+          phone:String(f.get('phone')||''),
+          requested_role:'agent',
+          governorate:String(f.get('governorate')||''),
+          district:String(f.get('district')||'')
+        },
         emailRedirectTo:'https://bachirban92.github.io/3annak/#agent'
       }
     });
