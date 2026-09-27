@@ -1346,6 +1346,105 @@ function bind(){
     go('home');
   });
 
+  const renderAddressEditor=async id=>{
+    const box=document.querySelector('#addressEditor');
+    if(!box)return;
+    let a=null;
+    if(id){
+      const r=await supabase.from('customer_addresses').select('*').eq('id',id).single();
+      if(r.error)return toast(r.error.message,true);
+      a=r.data;
+    }
+    box.innerHTML=`<form id="addressForm" class="inline-editor">
+      <input type="hidden" name="id" value="${esc(a?.id||'')}">
+      <input name="label" value="${esc(a?.label||'المنزل')}" required placeholder="اسم العنوان">
+      <input name="address_line1" value="${esc(a?.address_line1||'')}" required placeholder="العنوان">
+      <input name="address_line2" value="${esc(a?.address_line2||'')}" placeholder="تفاصيل إضافية (اختياري)">
+      <div class="grid">
+        <input name="city" value="${esc(a?.city||'')}" required placeholder="المدينة">
+        <input name="region" value="${esc(a?.region||'')}" placeholder="المنطقة / المحافظة">
+      </div>
+      <div class="grid">
+        <input name="postal_code" value="${esc(a?.postal_code||'')}" placeholder="الرمز البريدي (اختياري)">
+        <input name="country" value="${esc(a?.country||'Lebanon')}" required placeholder="الدولة">
+      </div>
+      <label class="checkline"><input type="checkbox" name="is_default" ${a?.is_default?'checked':''}> العنوان الافتراضي</label>
+      <div class="row-actions"><button class="primary">حفظ</button><button type="button" class="secondary" data-cancel-editor>إلغاء</button></div>
+    </form>`;
+    box.querySelector('[data-cancel-editor]').onclick=()=>box.innerHTML='';
+    box.querySelector('#addressForm').onsubmit=async e=>{
+      e.preventDefault();const fd=new FormData(e.currentTarget),b=e.currentTarget.querySelector('.primary');busy(b,true);
+      const {error}=await supabase.rpc('save_customer_address',{
+        p_id:fd.get('id')||null,p_label:fd.get('label'),p_address_line1:fd.get('address_line1'),
+        p_address_line2:fd.get('address_line2')||null,p_city:fd.get('city'),p_region:fd.get('region')||null,
+        p_postal_code:fd.get('postal_code')||null,p_country:fd.get('country'),p_is_default:fd.get('is_default')==='on'
+      });
+      busy(b,false);if(error)return toast(error.message,true);toast('تم حفظ العنوان');accountPage();
+    };
+  };
+
+  document.querySelectorAll('[data-add-address]').forEach(x=>x.onclick=()=>renderAddressEditor(null));
+  document.querySelectorAll('[data-edit-address]').forEach(x=>x.onclick=()=>renderAddressEditor(x.dataset.editAddress));
+  document.querySelectorAll('[data-delete-address]').forEach(x=>x.onclick=async()=>{
+    if(!confirm('حذف العنوان؟'))return;
+    const {error}=await supabase.rpc('delete_customer_address',{p_id:x.dataset.deleteAddress});
+    error?toast(error.message,true):(toast('تم حذف العنوان'),accountPage());
+  });
+
+  const renderPropertyEditor=async id=>{
+    const box=document.querySelector('#propertyEditor');
+    if(!box)return;
+    let p=null;
+    if(id){
+      const r=await supabase.from('customer_properties').select('*').eq('id',id).single();
+      if(r.error)return toast(r.error.message,true);
+      p=r.data;
+    }
+    box.innerHTML=`<form id="propertyForm" class="inline-editor">
+      <input type="hidden" name="id" value="${esc(p?.id||'')}">
+      <input name="label" value="${esc(p?.label||'عقار')}" required placeholder="اسم العقار">
+      <select name="governorate" required><option value="">المحافظة</option>${gov.map(g=>`<option ${p?.governorate===g?'selected':''}>${esc(g)}</option>`).join('')}</select>
+      <input name="district" value="${esc(p?.district||'')}" placeholder="القضاء (اختياري)">
+      <div class="grid">
+        <input name="cadastral_area" value="${esc(p?.cadastral_area||'')}" required placeholder="المنطقة العقارية">
+        <input name="property_number" value="${esc(p?.property_number||'')}" required placeholder="رقم العقار">
+      </div>
+      <input name="property_section" value="${esc(p?.property_section||'')}" placeholder="القسم / الحصة (اختياري)">
+      <textarea name="notes" placeholder="ملاحظة (اختياري)">${esc(p?.notes||'')}</textarea>
+      <label class="checkline"><input type="checkbox" name="is_default" ${p?.is_default?'checked':''}> العقار الافتراضي</label>
+      <div class="row-actions"><button class="primary">حفظ</button><button type="button" class="secondary" data-cancel-editor>إلغاء</button></div>
+    </form>`;
+    box.querySelector('[data-cancel-editor]').onclick=()=>box.innerHTML='';
+    box.querySelector('#propertyForm').onsubmit=async e=>{
+      e.preventDefault();const fd=new FormData(e.currentTarget),b=e.currentTarget.querySelector('.primary');busy(b,true);
+      const {error}=await supabase.rpc('save_customer_property',{
+        p_id:fd.get('id')||null,p_label:fd.get('label'),p_governorate:fd.get('governorate'),
+        p_district:fd.get('district')||null,p_cadastral_area:fd.get('cadastral_area'),
+        p_property_number:fd.get('property_number'),p_property_section:fd.get('property_section')||null,
+        p_notes:fd.get('notes')||null,p_is_default:fd.get('is_default')==='on'
+      });
+      busy(b,false);if(error)return toast(error.message,true);toast('تم حفظ العقار');await load();customerPropertiesPage();
+    };
+  };
+
+  document.querySelectorAll('[data-add-property]').forEach(x=>x.onclick=()=>renderPropertyEditor(null));
+  document.querySelectorAll('[data-edit-property]').forEach(x=>x.onclick=()=>renderPropertyEditor(x.dataset.editProperty));
+  document.querySelectorAll('[data-delete-property]').forEach(x=>x.onclick=async()=>{
+    if(!confirm('حذف العقار؟'))return;
+    const {error}=await supabase.rpc('delete_customer_property',{p_id:x.dataset.deleteProperty});
+    if(error)return toast(error.message,true);
+    toast('تم حذف العقار');await load();customerPropertiesPage();
+  });
+
+  const payoutAccountForm=document.querySelector('#payoutAccountForm');
+  if(payoutAccountForm)payoutAccountForm.onsubmit=async e=>{
+    e.preventDefault();const fd=new FormData(payoutAccountForm),b=payoutAccountForm.querySelector('button');busy(b,true);
+    const {error}=await supabase.rpc('save_agent_payout_account',{
+      p_account_holder:fd.get('account_holder'),p_bank_name:fd.get('bank_name')||null,p_iban:fd.get('iban')
+    });
+    busy(b,false);error?toast(error.message,true):(toast('تم حفظ بيانات التحويل'),accountPage());
+  };
+
   const accountProfileForm=document.querySelector('#accountProfileForm');
   if(accountProfileForm)accountProfileForm.onsubmit=async e=>{
     e.preventDefault();
