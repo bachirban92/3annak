@@ -303,47 +303,52 @@ async function agentPortal(){
   ]);
   const bal=balance?.[0]||{pending:0,available:0};
 
-  app.innerHTML=shell(`<section>
-    <div class="agentbar">
-      <div class="balancebox">${icon('wallet')}<span><small>الرصيد المتاح</small><strong>${money(bal.available)}</strong></span></div>
+  app.innerHTML=shell(`<section class="role-dashboard">
+    <div class="role-dashboard-bar">
+      <div><small>حساب الوكيل</small><h2>${esc(profile?.full_name||session?.user?.email||'')}</h2></div>
       <div class="agentbar-actions">
         <label class="availability"><input id="agentAvailable" type="checkbox" ${a.available?'checked':''}><span>${a.available?'متاح':'غير متاح'}</span></label>
         <button class="ghost" data-agent-logout>تسجيل الخروج</button>
       </div>
     </div>
-    <div class="earningsgrid">
-      <div><small>قيد التنفيذ</small><b>${money(bal.pending)}</b></div>
-      <div><small>متاح</small><b>${money(bal.available)}</b></div>
-      <div><small>مدفوع</small><b>${money(bal.paid)}</b></div>
+
+    <div class="role-dashboard-actions">
+      <button class="secondary" data-go="account">حسابي</button>
     </div>
 
-    <h3>طلباتي الحالية</h3>
-    <div class="stack">${(mine||[]).map(o=>`<button class="row" data-agent-order="${o.id}"><span><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span><i>${labels[o.status]}</i></button>`).join('')||'<div class="empty">لا يوجد طلبات حالية.</div>'}</div>
+    <div class="role-metrics">
+      <div><small>طلبات حالية</small><b>${(mine||[]).length}</b></div>
+      <div><small>طلبات متاحة</small><b>${(available||[]).length}</b></div>
+      <div><small>الرصيد المتاح</small><b>${money(bal.available)}</b></div>
+    </div>
 
-    <h3>طلبات متاحة</h3>
-    <div class="stack">${(available||[]).map(o=>`<div class="job">
-      <span><b>${esc(o.service_names)}</b><small>${esc(o.governorate)}${o.district?' • '+esc(o.district):''} • ${esc(o.cadastral_area)}</small></span>
-      <strong>${money(o.agent_payout)}</strong>
-      <button class="primary" data-accept="${o.id}">قبول</button>
-    </div>`).join('')||'<div class="empty">لا يوجد طلبات متاحة حالياً.</div>'}</div>
+    <section class="dashboard-panel">
+      <div class="dashboard-panel-head"><h3>طلباتي الحالية</h3></div>
+      <div class="stack">${(mine||[]).map(o=>`<button class="row" data-agent-order="${o.id}">
+        <span><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span>
+        <i>${labels[o.status]||o.status}</i>
+      </button>`).join('')||'<div class="empty">لا يوجد طلبات حالية.</div>'}</div>
+    </section>
 
-    <h3 class="sectionicon">${icon('check')}<span>طلبات مكتملة</span></h3>
-    <div class="stack">${(completed||[]).map(o=>`<button class="row" data-agent-order="${o.id}"><span><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span><i>تم التسليم</i></button>`).join('')||'<div class="empty">لا يوجد طلبات مكتملة بعد.</div>'}</div>
+    <section class="dashboard-panel">
+      <div class="dashboard-panel-head"><h3>طلبات متاحة</h3></div>
+      <div class="stack">${(available||[]).slice(0,8).map(o=>`<div class="job">
+        <span><b>${esc(o.service_names)}</b><small>${esc(o.governorate)} • ${esc(o.cadastral_area)}</small></span>
+        <strong>${money(o.agent_payout)}</strong>
+        <button class="primary" data-accept="${o.id}">قبول</button>
+      </div>`).join('')||'<div class="empty">لا يوجد طلبات متاحة حالياً.</div>'}</div>
+    </section>
 
-    <h3>الدفعات</h3>
-    <div class="stack">${(payouts||[]).map(p=>`<div class="adminrow"><span><b>${money(p.amount)}</b><small>${new Date(p.created_at).toLocaleDateString('ar-LB')}${p.provider_reference?' • '+esc(p.provider_reference):''}</small></span><i>${p.status==='paid'?'مدفوع':p.status==='pending'?'قيد الدفع':'ملغى'}</i></div>`).join('')||'<div class="empty">لا توجد دفعات بعد.</div>'}</div>
-
-    <h3 class="sectionicon">${icon('orders')}<span>آخر الإشعارات</span></h3>
-    <div class="stack">${(notifications||[]).map(n=>`<div class="notice ${n.read_at?'':'unread'}"><b>${esc(n.title)}</b><small>${esc(n.body)}</small></div>`).join('')||'<div class="empty">لا يوجد إشعارات.</div>'}</div>
-
-    <details class="coverage">
-      <summary>مناطق العمل</summary>
-      <form id="coverage">
-        <select name="governorate" required><option value="">المحافظة</option>${gov.map(x=>`<option>${x}</option>`).join('')}</select>
-        <input name="district" placeholder="القضاء (اختياري)">
-        <button class="secondary">إضافة</button>
-      </form>
-      <small>${(coverage||[]).map(x=>esc(x.governorate)+(x.district?' / '+esc(x.district):'')).join('، ')||'لم تضف مناطق بعد.'}</small>
+    <details class="dashboard-secondary">
+      <summary>السجل والدفعات</summary>
+      <div class="role-metrics compact">
+        <div><small>مكتملة</small><b>${(completed||[]).length}</b></div>
+        <div><small>قيد التنفيذ</small><b>${money(bal.pending)}</b></div>
+        <div><small>مدفوع</small><b>${money(bal.paid)}</b></div>
+      </div>
+      <div class="stack">${(completed||[]).slice(0,5).map(o=>`<button class="row" data-agent-order="${o.id}">
+        <span><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span><i>مكتمل</i>
+      </button>`).join('')}</div>
     </details>
   </section>`);
   bind();
