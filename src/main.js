@@ -168,6 +168,130 @@ async function customerPortal(){
     .on('postgres_changes',{event:'*',schema:'public',table:'orders',filter:`customer_id=eq.${session.user.id}`},()=>customerPortal())
     .subscribe();
 }
+function customerNav(active='home'){
+  return `<nav class="role-nav">
+    <button class="${active==='home'?'active':''}" data-go="customer">الرئيسية</button>
+    <button class="${active==='orders'?'active':''}" data-go="orders">طلباتي</button>
+    <button class="${active==='properties'?'active':''}" data-go="properties">عقاراتي</button>
+    <button class="${active==='documents'?'active':''}" data-go="documents">المستندات</button>
+    <button class="${active==='account'?'active':''}" data-go="account">حسابي</button>
+  </nav>`;
+}
+
+function agentNav(active='home'){
+  return `<nav class="role-nav agent-role-nav">
+    <button class="${active==='home'?'active':''}" data-go="agent">الرئيسية</button>
+    <button class="${active==='earnings'?'active':''}" data-go="agent-earnings">الأرباح</button>
+    <button class="${active==='account'?'active':''}" data-go="account">حسابي</button>
+  </nav>`;
+}
+
+async function customerPropertiesPage(){
+  clearLive();
+  if(profile?.role!=='customer')return go('home');
+  const {data,error}=await supabase.from('customer_properties').select('*').order('is_default',{ascending:false}).order('created_at',{ascending:false});
+  if(error)return toast(error.message,true);
+  customerProperties=data||[];
+
+  app.innerHTML=shell(`<section class="role-dashboard">
+    ${customerNav('properties')}
+    <div class="dashboard-panel-head"><h2>عقاراتي</h2><button class="primary compact" data-add-property>إضافة عقار</button></div>
+    <div class="stack">
+      ${customerProperties.map(p=>`<div class="account-list-row">
+        <div><b>${esc(p.label)}</b><small>${esc(p.governorate)}${p.district?' • '+esc(p.district):''} • ${esc(p.cadastral_area)} • عقار ${esc(p.property_number)}${p.is_default?' • افتراضي':''}</small></div>
+        <div class="row-actions">
+          <button class="secondary compact" data-edit-property="${p.id}">تعديل</button>
+          <button class="secondary compact" data-delete-property="${p.id}">حذف</button>
+        </div>
+      </div>`).join('')||'<div class="empty">لم تحفظ أي عقار بعد.</div>'}
+    </div>
+    <div id="propertyEditor"></div>
+  </section>`);
+  bind();
+}
+
+async function customerDocumentsPage(){
+  clearLive();
+  if(profile?.role!=='customer')return go('home');
+  const {data:ordersData,error}=await supabase.from('orders').select('id,public_code,cadastral_area,property_number,created_at').eq('customer_id',session.user.id).order('created_at',{ascending:false});
+  if(error)return toast(error.message,true);
+  const orderIds=(ordersData||[]).map(o=>o.id);
+  let docs=[];
+  if(orderIds.length){
+    const r=await supabase.from('documents').select('*').in('order_id',orderIds).eq('visible_to_customer',true).eq('kind','final_document').order('created_at',{ascending:false});
+    if(r.error)return toast(r.error.message,true);
+    docs=r.data||[];
+  }
+  const byOrder=Object.fromEntries((ordersData||[]).map(o=>[o.id,o]));
+
+  app.innerHTML=shell(`<section class="role-dashboard">
+    ${customerNav('documents')}
+    <h2>المستندات</h2>
+    <div class="document-list">
+      ${docs.map(d=>{const o=byOrder[d.order_id];return `<div class="document-row">
+        <div><b>${esc(d.original_name||'مستند')}</b><small>${esc(o?.public_code||'')} • ${esc(o?.cadastral_area||'')} • ${esc(o?.property_number||'')}</small></div>
+        <div class="document-actions">
+          <button class="secondary compact" data-file-view="${esc(d.storage_path)}" data-file-name="${esc(d.original_name||'مستند')}" data-file-mime="${esc(d.mime_type||'')}">عرض</button>
+          <button class="secondary compact" data-file-download="${esc(d.storage_path)}">تنزيل</button>
+        </div>
+      </div>`}).join('')||'<div class="empty">لا توجد مستندات نهائية بعد.</div>'}
+    </div>
+  </section>`);
+  bind();
+}
+
+async function customerPaymentsPage(){
+  clearLive();
+  if(profile?.role!=='customer')return go('home');
+  const {data:ordersData,error}=await supabase.from('orders').select('id,public_code,total_amount').eq('customer_id',session.user.id).order('created_at',{ascending:false});
+  if(error)return toast(error.message,true);
+  const ids=(ordersData||[]).map(o=>o.id);
+  let payments=[];
+  if(ids.length){
+    const r=await supabase.from('payments').select('*').in('order_id',ids).order('created_at',{ascending:false});
+    if(r.error)return toast(r.error.message,true);
+    payments=r.data||[];
+  }
+  const byOrder=Object.fromEntries((ordersData||[]).map(o=>[o.id,o]));
+  app.innerHTML=shell(`<section class="role-dashboard">
+    ${customerNav()}
+    <div class="title"><h2>الدفع</h2><button data-go="account">رجوع</button></div>
+    ${!paymentsEnabled?'<div class="info-box"><b>الدفع الإلكتروني غير مفعّل حالياً.</b><small>ستظهر طرق الدفع المحفوظة هنا بعد ربط مزود الدفع.</small></div>':''}
+    <section class="dashboard-panel">
+      <h3>سجل الدفع</h3>
+      <div class="stack">${payments.map(p=>`<div class="account-list-row"><div><b>${esc(byOrder[p.order_id]?.public_code||'طلب')}</b><small>${new Date(p.created_at).toLocaleDateString('ar-LB')}</small></div><div><b>${money(p.amount)}</b><small>${p.status==='paid'?'مدفوع':p.status==='refunded'?'مردود':p.status==='failed'?'فشل':'قيد الانتظار'}</small></div></div>`).join('')||'<div class="empty">لا توجد عمليات دفع.</div>'}</div>
+    </section>
+  </section>`);
+  bind();
+}
+
+async function agentEarningsPage(){
+  clearLive();
+  if(profile?.role!=='agent')return go('home');
+  const [{data:summary},{data:payouts},{data:ledger}]=await Promise.all([
+    supabase.rpc('get_agent_balance'),
+    supabase.from('payouts').select('*').eq('agent_id',session.user.id).order('created_at',{ascending:false}),
+    supabase.from('agent_ledger').select('*').eq('agent_id',session.user.id).order('created_at',{ascending:false}).limit(100)
+  ]);
+  const bal=summary?.[0]||{pending:0,available:0,paid:0};
+  app.innerHTML=shell(`<section class="role-dashboard">
+    ${agentNav('earnings')}
+    <h2>الأرباح</h2>
+    <div class="role-metrics">
+      <div><small>قيد التنفيذ</small><b>${money(bal.pending)}</b></div>
+      <div><small>متاح</small><b>${money(bal.available)}</b></div>
+      <div><small>مدفوع</small><b>${money(bal.paid)}</b></div>
+    </div>
+    <section class="dashboard-panel"><h3>الحركات</h3><div class="stack">
+      ${(ledger||[]).map(x=>`<div class="account-list-row"><div><b>${x.entry_type==='job_earning'?'أجر طلب':'حركة'}</b><small>${new Date(x.created_at).toLocaleDateString('ar-LB')}</small></div><div><b>${money(x.amount)}</b><small>${x.status==='available'?'متاح':x.status==='paid'?'مدفوع':x.status==='pending'?'معلّق':'ملغى'}</small></div></div>`).join('')||'<div class="empty">لا توجد حركات بعد.</div>'}
+    </div></section>
+    <section class="dashboard-panel"><h3>الدفعات</h3><div class="stack">
+      ${(payouts||[]).map(p=>`<div class="account-list-row"><div><b>${money(p.amount)}</b><small>${new Date(p.created_at).toLocaleDateString('ar-LB')}</small></div><small>${p.status==='paid'?'مدفوع':p.status==='pending'?'قيد الدفع':'ملغى'}</small></div>`).join('')||'<div class="empty">لا توجد دفعات بعد.</div>'}
+    </div></section>
+  </section>`);
+  bind();
+}
+
 async function accountPage(){
   clearLive();
   if(isAnonymousUser())return go('home');
