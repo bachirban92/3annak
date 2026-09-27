@@ -399,13 +399,14 @@ async function staffAccess(){
 async function admin(){
   clearLive();
   if(profile?.role!=='admin')return go('home');
-  const [{data:a},{data:s},{data:o},{data:reqs},{data:disputes},{data:workflow}]=await Promise.all([
+  const [{data:a},{data:s},{data:o},{data:reqs},{data:disputes},{data:workflow},{data:bundles}]=await Promise.all([
     supabase.from('agent_profiles').select('*').order('created_at',{ascending:false}),
     supabase.from('services').select('*').order('sort_order'),
     supabase.from('orders').select('*').order('created_at',{ascending:false}).limit(50),
     supabase.from('service_requirements').select('*').order('sort_order'),
     supabase.from('disputes').select('*').in('status',['open','reviewing']).order('created_at',{ascending:false}).limit(20),
-    supabase.from('service_workflow_steps').select('*').order('sort_order')
+    supabase.from('service_workflow_steps').select('*').order('sort_order'),
+    supabase.from('service_bundle_items').select('*').order('sort_order')
   ]);
   const ids=(a||[]).map(x=>x.user_id),names={};
   if(ids.length){
@@ -426,7 +427,7 @@ async function admin(){
     </button>`).join('')||'<div class="empty">لا توجد طلبات دعم مفتوحة.</div>'}</div>
 
     <h3>الخدمات والتسعير</h3>
-    <div class="stack">${renderServicesAdmin(s||[],reqs||[],workflow||[])}</div>
+    <div class="stack">${renderServicesAdmin(s||[],reqs||[],workflow||[],bundles||[])}</div>
     <h3>آخر الطلبات</h3>
     <div class="stack">${(o||[]).map(x=>`<button class="row" data-admin-order="${x.id}"><span><b>${x.public_code}</b><small>${esc(x.cadastral_area)} • ${esc(x.property_number)}</small></span><i>${labels[x.status]}</i></button>`).join('')}</div>
   </section>`);
