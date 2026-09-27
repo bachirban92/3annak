@@ -2,9 +2,10 @@ import { supabase } from './supabase.js';
 import { icon } from './icons.js';
 import { renderRequirements, bindRequirementActions } from './requirements.js';
 import { renderServicesAdmin, bindServicesAdmin } from './service-admin.js';
+import { renderNewOrder, bindServiceSelection } from './order-form.js';
 
 const app=document.querySelector('#app');
-let session=null,profile=null,services=[],liveChannel=null;
+let session=null,profile=null,services=[],bundleItems=[],liveChannel=null;
 
 const labels={
   submitted:'تم استلام الطلب',
@@ -45,11 +46,12 @@ async function load(){
     if(error){console.error(error);return}
     session=data.session;
   }
-  const [{data:p},{data:srv}]=await Promise.all([
+  const [{data:p},{data:srv},{data:bundles}]=await Promise.all([
     supabase.from('profiles').select('*').eq('id',session.user.id).maybeSingle(),
-    supabase.from('services').select('*').eq('active',true).order('sort_order')
+    supabase.from('services').select('*').eq('active',true).order('sort_order'),
+    supabase.from('service_bundle_items').select('*').order('sort_order')
   ]);
-  profile=p;services=srv||[];
+  profile=p;services=srv||[];bundleItems=bundles||[];
 }
 function home(){
   return shell(`<section class="hero rolehome">
@@ -68,27 +70,7 @@ function home(){
   </section>`);
 }
 function newOrder(){
-  return shell(`<section class="card">
-    <div class="title"><h2>طلب جديد</h2><button data-go="home">رجوع</button></div>
-    <form id="order">
-      <div class="grid">
-        <select name="governorate" required><option value="">المحافظة</option>${gov.map(x=>`<option>${x}</option>`).join('')}</select>
-        <input name="district" placeholder="القضاء">
-      </div>
-      <div class="grid">
-        <input name="cadastral_area" required placeholder="المنطقة العقارية">
-        <input name="property_number" required placeholder="رقم العقار">
-      </div>
-      <div class="services">
-        ${services.map(s=>`<label><input type="radio" name="service" value="${s.code}" required><span><b>${esc(s.name_ar)}</b><em>${money(Number(s.customer_price||0)+Number(s.official_fee||0))}</em></span></label>`).join('')}
-      </div>
-      <input name="name" value="${esc(profile?.full_name)}" placeholder="الاسم">
-      <input name="email" type="email" value="${esc(profile?.email)}" required placeholder="البريد الإلكتروني">
-      <input name="phone" value="${esc(profile?.phone)}" required placeholder="رقم الهاتف">
-      <textarea name="notes" placeholder="ملاحظة (اختياري)"></textarea>
-      <button class="primary full">إرسال الطلب</button>
-    </form>
-  </section>`);
+  return shell(renderNewOrder({services,bundleItems,profile,gov,esc,money}));
 }
 async function orders(){
   clearLive();
@@ -743,6 +725,7 @@ function bind(){
     customerDetail(supportForm.dataset.orderId);
   };
 
+  bindServiceSelection({services,money,toast});
   const order=document.querySelector('#order');
   if(order)order.onsubmit=async e=>{
     e.preventDefault();const f=new FormData(order),b=order.querySelector('button');busy(b,true);
@@ -752,7 +735,8 @@ function bind(){
     const {data,error}=await supabase.rpc('create_order',{
       p_customer_name:f.get('name')||'',p_customer_phone:f.get('phone'),p_customer_email:f.get('email')||'',
       p_governorate:f.get('governorate'),p_district:f.get('district')||'',p_cadastral_area:f.get('cadastral_area'),
-      p_property_number:f.get('property_number'),p_property_section:'',p_notes:f.get('notes')||'',p_service_codes:[f.get('service')]
+      p_property_number:f.get('property_number'),p_property_section:f.get('property_section')||'',p_notes:f.get('notes')||'',
+      p_service_codes:f.getAll('service')
     });
     busy(b,false);
     if(error)toast(error.message,true);
