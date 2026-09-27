@@ -195,7 +195,7 @@ async function orders(){
 }
 async function customerDetail(id){
   clearLive();
-  const [{data:o,error},{data:e},{data:d},{data:i},{data:reqs},{data:feedback},{data:deliverables}]=await Promise.all([
+  const [{data:o,error},{data:e},{data:d},{data:i},{data:reqs},{data:feedback},{data:deliverables},{data:payments}]=await Promise.all([
     supabase.from('orders').select('*').eq('id',id).single(),
     supabase.from('order_events').select('*').eq('order_id',id).order('created_at'),
     supabase.from('documents').select('*').eq('order_id',id).eq('visible_to_customer',true).order('created_at'),
@@ -203,16 +203,25 @@ async function customerDetail(id){
     supabase.from('order_requirements').select('*').eq('order_id',id).order('created_at'),
     supabase.rpc('get_order_feedback',{p_order_id:id}),
     supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order'),
-    supabase.from('order_workflow_steps').select('*').eq('order_id',id).order('sort_order')
+    supabase.from('payments').select('*').eq('order_id',id).order('created_at',{ascending:false}).limit(1)
   ]);
   if(error)return toast(error.message,true);
   const incompleteRequired=(reqs||[]).filter(r=>r.required&&!r.completed_at);
+  const payment=payments?.[0];
+  const paymentLabel=o.refund_pending?'رد المبلغ قيد المعالجة':
+    payment?.status==='paid'?'مدفوع':
+    payment?.status==='refunded'?'تم رد المبلغ':
+    payment?.status==='failed'?'فشل الدفع':'بانتظار الدفع';
   app.innerHTML=shell(`<section class="card">
     <div class="title"><h2>${o.public_code}</h2><button data-go="orders">رجوع</button></div>
     <div class="summary">
       <b>${esc(o.cadastral_area)} • عقار ${esc(o.property_number)}</b>
       <span>${(i||[]).map(x=>esc(x.service_name_ar)).join('، ')}</span>
       <strong>${money(o.total_amount)}</strong>
+    </div>
+    <div class="paymentbox">
+      <div><small>الدفع</small><b>${paymentLabel}</b></div>
+      <strong>${money(payment?.amount??o.total_amount)}</strong>
     </div>
     ${o.status==='completed'?`<div class="completebox"><span class="completecheck">✓</span><div><b>اكتمل الطلب</b><small>مستنداتك جاهزة أدناه.</small></div></div>`:''}
     ${incompleteRequired.length?`<div class="completebox requirementgate"><span class="completecheck">!</span><div><b>أكمل المعلومات المطلوبة</b><small>لن يظهر الطلب للوكلاء قبل إكمال ${incompleteRequired.length} عنصر مطلوب.</small></div></div>`:''}
@@ -424,7 +433,8 @@ async function agentJob(id){
     supabase.rpc('get_agent_job',{p_order_id:id}),
     supabase.from('order_events').select('*').eq('order_id',id).order('created_at'),
     supabase.from('documents').select('*').eq('order_id',id).order('created_at'),
-    supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order')
+    supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order'),
+    supabase.from('order_workflow_steps').select('*').eq('order_id',id).order('sort_order')
   ]);
   const o=rows?.[0];
   if(error||!o)return toast(error?.message||'تعذر فتح الطلب',true);
@@ -665,9 +675,10 @@ async function adminAgent(id){
 async function adminOrder(id){
   clearLive();
   if(profile?.role!=='admin')return go('home');
-  const [{data:pack,error},{data:agents}]=await Promise.all([
+  const [{data:pack,error},{data:agents},{data:payments}]=await Promise.all([
     supabase.rpc('admin_get_order',{p_order_id:id}),
-    supabase.from('agent_profiles').select('user_id,verification_status').eq('verification_status','approved')
+    supabase.from('agent_profiles').select('user_id,verification_status').eq('verification_status','approved'),
+    supabase.from('payments').select('*').eq('order_id',id).order('created_at',{ascending:false}).limit(1)
   ]);
   if(error||!pack)return toast(error?.message||'تعذر فتح الطلب',true);
 
@@ -677,6 +688,7 @@ async function adminOrder(id){
     (p||[]).forEach(x=>agentNames[x.id]=x);
   }
   const o=pack.order,items=pack.items||[],events=pack.events||[],docs=pack.documents||[],reqs=pack.requirements||[];
+  const payment=payments?.[0];
   app.innerHTML=shell(`<section class="card">
     <div class="title"><h2>${esc(o.public_code)}</h2><button data-go="admin">رجوع</button></div>
     <div class="jobinfo">
@@ -686,6 +698,18 @@ async function adminOrder(id){
       <div><small>الخدمة</small><b>${items.map(x=>esc(x.service_name_ar)).join('، ')}</b></div>
       <div><small>الإجمالي</small><b>${money(o.total_amount)}</b></div>
       <div><small>الحالة</small><b>${labels[o.status]||o.status}</b></div>
+    </div>
+
+    <h3>الدفع</h3>
+    <div class="adminrow paymentadmin">
+      <span>
+        <b>${money(payment?.amount??o.total_amount)}</b>
+        <small>${o.refund_pending?'رد المبلغ قيد المعالجة':payment?.status==='paid'?'مدفوع':payment?.status==='refunded'?'تم رد المبلغ':payment?.status==='failed'?'فشل الدفع':'بانتظار الدفع'}</small>
+      </span>
+      <div class="paymentactions">
+        ${payment&&['pending','failed'].includes(payment.status)?`<button class="secondary compact" data-mark-payment-paid="${payment.id}" data-order-id="${o.id}">تسجيل مدفوع</button>`:''}
+        ${payment&&payment.status==='paid'&&o.status==='cancelled'?`<button class="secondary compact" data-mark-payment-refunded="${payment.id}" data-order-id="${o.id}">تسجيل رد المبلغ</button>`:''}
+      </div>
     </div>
 
     <h3>إدارة الطلب</h3>
@@ -1174,6 +1198,27 @@ function bind(){
     const {error}=await supabase.rpc('admin_reassign_order',{p_order_id:id,p_agent_id:d.get('agent'),p_reason:''});
     busy(b,false);error?toast(error.message,true):(toast('تم تعيين الوكيل'),adminOrder(id));
   };
+
+  document.querySelectorAll('[data-mark-payment-paid]').forEach(x=>x.onclick=async()=>{
+    busy(x,true);
+    const {error}=await supabase.rpc('admin_mark_payment_paid',{
+      p_payment_id:x.dataset.markPaymentPaid,
+      p_provider:'manual',
+      p_provider_reference:null
+    });
+    busy(x,false);
+    error?toast(error.message,true):(toast('تم تسجيل الدفع'),adminOrder(x.dataset.orderId));
+  });
+
+  document.querySelectorAll('[data-mark-payment-refunded]').forEach(x=>x.onclick=async()=>{
+    busy(x,true);
+    const {error}=await supabase.rpc('admin_mark_payment_refunded',{
+      p_payment_id:x.dataset.markPaymentRefunded,
+      p_provider_reference:null
+    });
+    busy(x,false);
+    error?toast(error.message,true):(toast('تم تسجيل رد المبلغ'),adminOrder(x.dataset.orderId));
+  });
 
   document.querySelectorAll('[data-admin-cancel]').forEach(x=>x.onclick=async()=>{
     if(!confirm('إلغاء هذا الطلب؟'))return;
