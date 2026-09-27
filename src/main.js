@@ -1,6 +1,7 @@
 import { supabase } from './supabase.js';
 import { icon } from './icons.js';
 import { renderRequirements, bindRequirementActions } from './requirements.js';
+import { renderServicesAdmin, bindServicesAdmin } from './service-admin.js';
 
 const app=document.querySelector('#app');
 let session=null,profile=null,services=[],liveChannel=null;
@@ -268,10 +269,11 @@ async function agentJob(id){
 async function admin(){
   clearLive();
   if(profile?.role!=='admin')return go('home');
-  const [{data:a},{data:s},{data:o}]=await Promise.all([
+  const [{data:a},{data:s},{data:o},{data:reqs}]=await Promise.all([
     supabase.from('agent_profiles').select('*').order('created_at',{ascending:false}),
     supabase.from('services').select('*').order('sort_order'),
-    supabase.from('orders').select('*').order('created_at',{ascending:false}).limit(50)
+    supabase.from('orders').select('*').order('created_at',{ascending:false}).limit(50),
+    supabase.from('service_requirements').select('*').order('sort_order')
   ]);
   const ids=(a||[]).map(x=>x.user_id),names={};
   if(ids.length){
@@ -282,8 +284,8 @@ async function admin(){
     <div class="title"><h2>الإدارة</h2><button data-go="home">رجوع</button></div>
     <h3>الوكلاء</h3>
     <div class="stack">${(a||[]).map(x=>`<div class="adminrow"><span><b>${esc(names[x.user_id]?.full_name||names[x.user_id]?.email||x.user_id)}</b><small>${x.verification_status}</small></span>${x.verification_status==='approved'?`<button class="danger" data-suspend="${x.user_id}">تعليق</button>`:`<button class="primary" data-approve="${x.user_id}">اعتماد</button>`}</div>`).join('')||'<div class="empty">لا يوجد.</div>'}</div>
-    <h3>الأسعار</h3>
-    <div class="stack">${(s||[]).map(x=>`<form class="price" data-service="${x.id}"><b>${esc(x.name_ar)}</b><input name="cp" type="number" value="${x.customer_price}"><input name="ap" type="number" value="${x.agent_payout}"><label class="check"><input name="active" type="checkbox" ${x.active?'checked':''}> فعّال</label><button class="secondary">حفظ</button></form>`).join('')}</div>
+    <h3>الخدمات والتسعير</h3>
+    <div class="stack">${renderServicesAdmin(s||[],reqs||[])}</div>
     <h3>آخر الطلبات</h3>
     <div class="stack">${(o||[]).map(x=>`<button class="row" data-admin-order="${x.id}"><span><b>${x.public_code}</b><small>${esc(x.cadastral_area)} • ${esc(x.property_number)}</small></span><i>${labels[x.status]}</i></button>`).join('')}</div>
   </section>`);
@@ -472,6 +474,8 @@ function bind(){
     const {error}=await supabase.rpc('admin_cancel_order',{p_order_id:x.dataset.adminCancel,p_reason:''});
     error?toast(error.message,true):(toast('تم إلغاء الطلب'),admin());
   });
+
+  bindServicesAdmin({toast,busy,reload:admin});
 
   document.querySelectorAll('[data-service]').forEach(f=>f.onsubmit=async e=>{
     e.preventDefault();const d=new FormData(f),b=f.querySelector('button');busy(b,true);
