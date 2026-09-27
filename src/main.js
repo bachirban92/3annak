@@ -772,6 +772,34 @@ async function agentPortal(){
     supabase.from('payouts').select('*').eq('agent_id',session.user.id).order('created_at',{ascending:false}).limit(10)
   ]);
   const bal=balance?.[0]||{pending:0,available:0};
+  const mineIds=(mine||[]).map(o=>o.id);
+
+  let workflowRows=[],deliverableRows=[],finalDocRows=[];
+  if(mineIds.length){
+    const [w,dv,fd]=await Promise.all([
+      supabase.from('order_workflow_steps').select('*').in('order_id',mineIds).order('sort_order'),
+      supabase.from('order_deliverables').select('id,order_id').in('order_id',mineIds),
+      supabase.from('documents').select('id,order_id,deliverable_id,kind').in('order_id',mineIds).eq('kind','final_document')
+    ]);
+    if(w.error)return toast(w.error.message,true);
+    if(dv.error)return toast(dv.error.message,true);
+    if(fd.error)return toast(fd.error.message,true);
+    workflowRows=w.data||[];deliverableRows=dv.data||[];finalDocRows=fd.data||[];
+  }
+
+  const nextByOrder={};
+  for(const o of mine||[]){
+    const wf=workflowRows.filter(x=>x.order_id===o.id);
+    const nextStep=wf.find(x=>!x.completed_at);
+    const dels=deliverableRows.filter(x=>x.order_id===o.id);
+    const doneIds=new Set(finalDocRows.filter(x=>x.order_id===o.id).map(x=>x.deliverable_id));
+    const missing=dels.filter(x=>!doneIds.has(x.id)).length;
+    nextByOrder[o.id]=nextStep
+      ?{title:'الخطوة التالية',text:nextStep.label_ar,kind:'action'}
+      :missing
+        ?{title:'مطلوب منك',text:`ارفع ${missing} مستند نهائي`,kind:'action'}
+        :{title:'الخطوة التالية',text:'إكمال الطلب',kind:'action'};
+  }
 
   app.innerHTML=shell(`<section class="role-dashboard">
     ${agentNav('home')}
@@ -783,22 +811,28 @@ async function agentPortal(){
       </div>
     </div>
 
-    <div class="role-dashboard-actions">
-      <button class="secondary" data-go="account">حسابي</button>
-    </div>
-
     <div class="role-metrics">
       <div><small>طلبات حالية</small><b>${(mine||[]).length}</b></div>
       <div><small>طلبات متاحة</small><b>${(available||[]).length}</b></div>
       <div><small>الرصيد المتاح</small><b>${money(bal.available)}</b></div>
     </div>
 
+    ${(mine||[]).length?`<section class="dashboard-panel attention-panel">
+      <div class="dashboard-panel-head"><h3>مطلوب منك</h3></div>
+      <div class="stack">
+        ${(mine||[]).map(o=>{const a=nextByOrder[o.id];return `<button class="action-row" data-agent-order="${o.id}">
+          <span><b>${o.public_code}</b><small>${esc(a?.text||labels[o.status]||o.status)}</small></span>
+          <strong>فتح</strong>
+        </button>`}).join('')}
+      </div>
+    </section>`:''}
+
     <section class="dashboard-panel">
       <div class="dashboard-panel-head"><h3>طلباتي الحالية</h3></div>
-      <div class="stack">${(mine||[]).map(o=>`<button class="row" data-agent-order="${o.id}">
-        <span><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span>
-        <i>${labels[o.status]||o.status}</i>
-      </button>`).join('')||'<div class="empty">لا يوجد طلبات حالية.</div>'}</div>
+      <div class="stack">${(mine||[]).map(o=>{const a=nextByOrder[o.id];return `<button class="order-dashboard-row" data-agent-order="${o.id}">
+        <span class="order-dashboard-main"><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span>
+        <span class="order-dashboard-state action"><b>${labels[o.status]||o.status}</b><small>${esc(a?.text||'')}</small></span>
+      </button>`}).join('')||'<div class="empty">لا يوجد طلبات حالية.</div>'}</div>
     </section>
 
     <section class="dashboard-panel">
@@ -829,6 +863,9 @@ async function agentPortal(){
       toast('طلب جديد متاح');agentPortal();
     })
     .on('postgres_changes',{event:'UPDATE',schema:'public',table:'orders',filter:`assigned_agent_id=eq.${session.user.id}`},()=>agentPortal())
+    .on('postgres_changes',{event:'*',schema:'public',table:'order_workflow_steps'},payload=>{
+      if(mineIds.includes(payload.new?.order_id||payload.old?.order_id))agentPortal();
+    })
     .subscribe();
 }
 async function agentJob(id){
@@ -853,9 +890,20 @@ async function agentJob(id){
   const docByDeliverable=Object.fromEntries(finalDocs.map(x=>[x.deliverable_id,x]));
   const docById=Object.fromEntries((docs||[]).map(x=>[x.id,x]));
   const missingDeliverables=(deliverables||[]).filter(x=>!docByDeliverable[x.id]);
+  const agentAction=!next
+    ?{kind:'ok',title:'تم إكمال الطلب',text:'لا يوجد إجراء مطلوب.'}
+    :next[0]==='completed'&&missingDeliverables.length
+      ?{kind:'action',title:'مطلوب منك الآن',text:`ارفع ${missingDeliverables.length} مستند نهائي قبل إكمال الطلب.`}
+      :{kind:'action',title:'الخطوة التالية',text:next[1]};
 
-  app.innerHTML=shell(`<section class="card">
+  app.innerHTML=shell(`<section class="card order-workspace">
     <div class="title"><h2>${o.public_code}</h2><button data-go="agent">رجوع</button></div>
+
+    <div class="next-step-card ${agentAction.kind}">
+      <small>العمل الحالي</small>
+      <b>${esc(agentAction.title)}</b>
+      <span>${esc(agentAction.text)}</span>
+    </div>
 
     <div class="jobinfo">
       <div><small>الخدمة</small><b>${esc(o.service_names)}</b></div>
