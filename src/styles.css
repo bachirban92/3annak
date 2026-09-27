@@ -292,3 +292,24 @@ h3{margin:26px 0 11px;font-size:19px}
   .row-actions{width:100%}
   .row-actions button{flex:1}
 }
+
+.next-step-card{display:grid;gap:4px;border:1px solid var(--line);border-radius:14px;padding:14px;background:#fff}
+.next-step-card small{color:var(--muted)}
+.next-step-card b{font-size:18px}
+.next-step-card.action{border-width:2px}
+.next-step-card.ok{background:#f7f7f7}
+.next-step-card.waiting{background:#fafafa}
+.action-row,.order-dashboard-row{width:100%;display:flex;justify-content:space-between;align-items:center;gap:12px;text-align:right;border:1px solid var(--line);border-radius:12px;background:#fff;padding:12px;color:#111}
+.action-row>span,.order-dashboard-main,.order-dashboard-state{display:grid;gap:3px}
+.action-row small,.order-dashboard-row small{color:var(--muted)}
+.action-row strong{white-space:nowrap}
+.order-dashboard-state{text-align:left;min-width:170px}
+.order-dashboard-state.action b{font-weight:900}
+.order-dashboard-state.waiting b,.order-dashboard-state.ok b{font-weight:800}
+.attention-panel{border-width:2px}
+.order-workspace{display:grid;gap:14px}
+@media(max-width:620px){
+  .action-row,.order-dashboard-row{align-items:flex-start}
+  .order-dashboard-row{flex-direction:column}
+  .order-dashboard-state{text-align:right;min-width:0;width:100%}
+}
