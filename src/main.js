@@ -625,20 +625,20 @@ async function agentJob(id){
     .on('postgres_changes',{event:'*',schema:'public',table:'order_events',filter:`order_id=eq.${id}`},()=>agentJob(id))
     .subscribe();
 }
-async function staffAccess(){
+async function adminAccess(){
   clearLive();
   if(profile?.role==='admin'){
     go('admin');
     return;
   }
 
-  app.innerHTML=shell(`<section class="card narrow stafflogin">
+  app.innerHTML=shell(`<section class="card narrow adminlogin">
     <div class="title"><h2>دخول الإدارة</h2><button data-go="home">رجوع</button></div>
-    <form id="staffLogin">
+    <form id="adminLogin">
       <input name="email" type="email" autocomplete="email" required placeholder="البريد الإلكتروني">
       <button class="primary full">إرسال رابط الدخول</button>
     </form>
-    <small class="staffhint">الدخول متاح فقط للحساب الإداري المعتمد.</small>
+    <small class="adminhint">الدخول متاح فقط للحساب الإداري المعتمد.</small>
   </section>`);
   bind();
 }
@@ -953,11 +953,11 @@ function render(){
     return agentRegister();
   }
 
-  if(r==='staff')return staffAccess();
-  if(r==='admin')return profile?.role==='admin'?admin():staffAccess();
-  if(r.startsWith('admin-dispute/'))return profile?.role==='admin'?adminDispute(r.split('/')[1]):staffAccess();
-  if(r.startsWith('admin-agent/'))return profile?.role==='admin'?adminAgent(r.split('/')[1]):staffAccess();
-  if(r.startsWith('admin-order/'))return profile?.role==='admin'?adminOrder(r.split('/')[1]):staffAccess();
+  if(r==='staff')return go('admin');
+  if(r==='admin')return profile?.role==='admin'?admin():adminAccess();
+  if(r.startsWith('admin-dispute/'))return profile?.role==='admin'?adminDispute(r.split('/')[1]):adminAccess();
+  if(r.startsWith('admin-agent/'))return profile?.role==='admin'?adminAgent(r.split('/')[1]):adminAccess();
+  if(r.startsWith('admin-order/'))return profile?.role==='admin'?adminOrder(r.split('/')[1]):adminAccess();
 
   return go('home');
 }
@@ -1232,22 +1232,22 @@ function bind(){
     go('home');
   });
 
-  const staffLogin=document.querySelector('#staffLogin');
-  if(staffLogin)staffLogin.onsubmit=async e=>{
+  const adminLogin=document.querySelector('#adminLogin');
+  if(adminLogin)adminLogin.onsubmit=async e=>{
     e.preventDefault();
-    const fd=new FormData(staffLogin),email=String(fd.get('email')||'').trim().toLowerCase();
-    const b=staffLogin.querySelector('button');
+    const fd=new FormData(adminLogin),email=String(fd.get('email')||'').trim().toLowerCase();
+    const b=adminLogin.querySelector('button');
     if(email!=='bachir.ban@gmail.com')return toast('هذا البريد غير مخوّل للإدارة.',true);
     busy(b,true,'جارٍ الإرسال...');
     await supabase.auth.signOut();
-    const redirect=new URL('./#staff',location.href).href;
+    const redirect=new URL('./#admin',location.href).href;
     const {error}=await supabase.auth.signInWithOtp({
       email,
       options:{emailRedirectTo:redirect,shouldCreateUser:true}
     });
     busy(b,false);
     if(error)return toast(error.message,true);
-    staffLogin.innerHTML='<div class="loginSent"><b>تم إرسال رابط الدخول.</b><small>افتح بريدك واضغط الرابط للمتابعة.</small></div>';
+    adminLogin.innerHTML='<div class="loginSent"><b>تم إرسال رابط الدخول.</b><small>افتح بريدك واضغط الرابط للمتابعة.</small></div>';
   };
 
   const ratingForm=document.querySelector('#ratingForm');
