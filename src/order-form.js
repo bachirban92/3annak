@@ -89,6 +89,7 @@ export function renderNewOrder({services,bundleItems,serviceRequirements,savedPr
           <div><small>الخدمة</small><b id="reviewServices"></b></div>
           <div><small>العقار</small><b id="reviewProperty">—</b></div>
           <div><small>المطلوب منك</small><b id="reviewRequirements">—</b></div>
+          <div><small>الاستلام</small><b id="reviewDelivery">نسخة إلكترونية</b></div>
           <div><small>الإجمالي</small><b id="reviewTotal"></b></div>
         </div>
       </section>
@@ -115,6 +116,7 @@ export function bindServiceSelection({services,bundleItems,serviceRequirements,s
   const reviewServices=form.querySelector('#reviewServices');
   const reviewProperty=form.querySelector('#reviewProperty');
   const reviewRequirements=form.querySelector('#reviewRequirements');
+  const reviewDelivery=form.querySelector('#reviewDelivery');
   const reviewTotal=form.querySelector('#reviewTotal');
   const reqSection=form.querySelector('#preorderRequirementsSection');
   const reqContainer=form.querySelector('#preorderRequirements');
@@ -199,6 +201,7 @@ export function bindServiceSelection({services,bundleItems,serviceRequirements,s
     reviewServices.textContent=chosen.map(x=>x.name_ar).join('، ');
     reviewProperty.textContent=propertyBits.join(' • ')||'—';
     reviewRequirements.textContent=required.length?`${completed}/${required.length} مكتمل`:'لا يوجد متطلبات إضافية';
+    reviewDelivery.textContent=deliveryMode==='hard_copy'?`نسخة ورقية + إلكترونية (+${money(deliveryFee)})`:'نسخة إلكترونية';
     reviewTotal.textContent=money(total);
   };
 
