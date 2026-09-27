@@ -11,18 +11,37 @@ const workflowStages=[
 ];
 
 export function renderServicesAdmin(services=[],requirements=[],workflow=[]){
-  return services.map(s=>{
+  const create='<form id="newServiceAdmin" class="serviceadmin newservice">'+
+    '<div class="serviceadminhead"><span><b>إضافة نوع مستند</b><small>أنشئ خدمة جديدة وحدد السعر والمدة.</small></span></div>'+
+    '<div class="servicefields">'+
+      '<label><small>اسم المستند</small><input name="name" required placeholder="اسم المستند"></label>'+
+      '<label class="widefield"><small>وصف مختصر</small><input name="description" placeholder="يظهر للعميل"></label>'+
+      '<label><small>سعر الخدمة</small><input name="cp" type="number" min="0" step="0.01" value="0" required></label>'+
+      '<label><small>الرسوم الرسمية</small><input name="official_fee" type="number" min="0" step="0.01" value="0"></label>'+
+      '<label><small>بدل الوكيل</small><input name="ap" type="number" min="0" step="0.01" value="0" required></label>'+
+      '<label><small>أقل مدة (أيام)</small><input name="eta_min" type="number" min="0" step="1"></label>'+
+      '<label><small>أقصى مدة (أيام)</small><input name="eta_max" type="number" min="0" step="1"></label>'+
+    '</div>'+
+    '<button class="primary">إضافة المستند</button>'+
+  '</form>';
+  return create+services.map(s=>{
     const reqs=requirements.filter(r=>r.service_id===s.id&&r.active);
     const wf=workflow.filter(r=>r.service_id===s.id);
     const active=new Set(wf.filter(x=>x.active).map(x=>x.status));
     return '<div class="serviceadmin">'+
-      '<form class="price" data-service="'+s.id+'">'+
-        '<b>'+esc(s.name_ar)+'</b>'+
-        '<label><small>سعر الخدمة</small><input name="cp" type="number" value="'+Number(s.customer_price||0)+'"></label>'+
-        '<label><small>الرسوم الرسمية</small><input name="official_fee" type="number" value="'+Number(s.official_fee||0)+'"></label>'+
-        '<label><small>بدل الوكيل</small><input name="ap" type="number" value="'+Number(s.agent_payout||0)+'"></label>'+
-        '<label class="check"><input name="active" type="checkbox" '+(s.active?'checked':'')+'> فعّال</label>'+
-        '<button class="secondary">حفظ</button>'+
+      '<div class="serviceadminhead"><span><b>'+esc(s.name_ar)+'</b><small>'+(s.service_type==='bundle'?'حزمة مستندات':'نوع مستند')+'</small></span><i>'+(s.active?'فعّال':'متوقف')+'</i></div>'+
+      '<form class="price servicecatalog" data-service-catalog="'+s.id+'">'+
+        '<div class="servicefields">'+
+          '<label><small>اسم المستند</small><input name="name" required value="'+esc(s.name_ar)+'"></label>'+
+          '<label class="widefield"><small>الوصف</small><input name="description" value="'+esc(s.description_ar||'')+'"></label>'+
+          '<label><small>سعر الخدمة</small><input name="cp" type="number" min="0" step="0.01" value="'+Number(s.customer_price||0)+'"></label>'+
+          '<label><small>الرسوم الرسمية</small><input name="official_fee" type="number" min="0" step="0.01" value="'+Number(s.official_fee||0)+'"></label>'+
+          '<label><small>بدل الوكيل</small><input name="ap" type="number" min="0" step="0.01" value="'+Number(s.agent_payout||0)+'"></label>'+
+          '<label><small>أقل مدة (أيام)</small><input name="eta_min" type="number" min="0" step="1" value="'+(s.expected_days_min??'')+'"></label>'+
+          '<label><small>أقصى مدة (أيام)</small><input name="eta_max" type="number" min="0" step="1" value="'+(s.expected_days_max??'')+'"></label>'+
+          '<label class="check"><input name="active" type="checkbox" '+(s.active?'checked':'')+'> فعّال</label>'+
+        '</div>'+
+        '<button class="secondary">حفظ الخدمة</button>'+
       '</form>'+
       '<div class="serviceblock">'+
         '<small class="servicelabel">متطلبات العميل</small>'+
