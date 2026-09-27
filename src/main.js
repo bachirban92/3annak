@@ -987,14 +987,16 @@ async function admin(section='overview'){
   const allowed=new Set(['overview','orders','agents','services','support']);
   if(!allowed.has(section))section='overview';
 
-  const [{data:a},{data:srv},{data:o},{data:reqs},{data:disputes},{data:workflow},{data:bundles}]=await Promise.all([
+  const [{data:a},{data:srv},{data:o},{data:reqs},{data:disputes},{data:workflow},{data:bundles},{data:incompleteReqs},{data:failedPayments}]=await Promise.all([
     supabase.from('agent_profiles').select('*').order('created_at',{ascending:false}),
     supabase.from('services').select('*').order('sort_order'),
     supabase.from('orders').select('*').order('created_at',{ascending:false}).limit(50),
     supabase.from('service_requirements').select('*').order('sort_order'),
     supabase.from('disputes').select('*').in('status',['open','reviewing']).order('created_at',{ascending:false}).limit(50),
     supabase.from('service_workflow_steps').select('*').order('sort_order'),
-    supabase.from('service_bundle_items').select('*').order('sort_order')
+    supabase.from('service_bundle_items').select('*').order('sort_order'),
+    supabase.from('order_requirements').select('order_id').eq('required',true).is('completed_at',null),
+    supabase.from('payments').select('order_id,status').eq('status','failed')
   ]);
 
   const ids=(a||[]).map(x=>x.user_id),names={};
@@ -1007,6 +1009,14 @@ async function admin(section='overview'){
   const pendingAgents=(a||[]).filter(x=>x.verification_status==='pending').length;
   const activeServices=(srv||[]).filter(x=>x.active).length;
   const openSupport=(disputes||[]).length;
+  const incompleteOrderIds=new Set((incompleteReqs||[]).map(x=>x.order_id));
+  const refundOrders=(o||[]).filter(x=>x.refund_pending);
+  const readyUnassigned=(o||[]).filter(x=>
+    x.status==='submitted'&&!x.assigned_agent_id&&!incompleteOrderIds.has(x.id)
+  );
+  const waitingCustomer=(o||[]).filter(x=>incompleteOrderIds.has(x.id)&&!['completed','cancelled'].includes(x.status));
+  const failedPaymentOrders=new Set((failedPayments||[]).map(x=>x.order_id));
+  const adminAttention=pendingAgents+openSupport+refundOrders.length+readyUnassigned.length+(paymentsEnabled?failedPaymentOrders.size:0);
 
   const nav=`<div class="adminnav">
     <button class="${section==='overview'?'active':''}" data-go="admin">الرئيسية</button>
@@ -1022,10 +1032,31 @@ async function admin(section='overview'){
     body=`
       <div class="adminmetrics">
         <button data-go="admin/orders"><small>طلبات جارية</small><b>${activeOrders}</b></button>
-        <button data-go="admin/agents"><small>وكلاء بانتظار المراجعة</small><b>${pendingAgents}</b></button>
+        <button data-go="admin/agents"><small>وكلاء للمراجعة</small><b>${pendingAgents}</b></button>
         <button data-go="admin/support"><small>دعم مفتوح</small><b>${openSupport}</b></button>
-        <button data-go="admin/services"><small>خدمات فعّالة</small><b>${activeServices}</b></button>
+        <button><small>بحاجة لتدخل</small><b>${adminAttention}</b></button>
       </div>
+
+      ${adminAttention?`<section class="adminpanel attention-panel">
+        <div class="adminsectionhead"><h3>بحاجة لتدخل</h3><small>${adminAttention}</small></div>
+        <div class="stack">
+          ${pendingAgents?`<button class="action-row" data-go="admin/agents"><span><b>مراجعة الوكلاء</b><small>${pendingAgents} حساب بانتظار المراجعة</small></span><strong>فتح</strong></button>`:''}
+          ${openSupport?`<button class="action-row" data-go="admin/support"><span><b>طلبات الدعم</b><small>${openSupport} طلب مفتوح</small></span><strong>فتح</strong></button>`:''}
+          ${refundOrders.map(x=>`<button class="action-row" data-admin-order="${x.id}"><span><b>${x.public_code}</b><small>رد مبلغ بانتظار المعالجة</small></span><strong>فتح</strong></button>`).join('')}
+          ${readyUnassigned.map(x=>`<button class="action-row" data-admin-order="${x.id}"><span><b>${x.public_code}</b><small>جاهز للوكلاء ولم يتم تعيين وكيل بعد</small></span><strong>فتح</strong></button>`).join('')}
+          ${paymentsEnabled?(o||[]).filter(x=>failedPaymentOrders.has(x.id)).map(x=>`<button class="action-row" data-admin-order="${x.id}"><span><b>${x.public_code}</b><small>فشل الدفع</small></span><strong>فتح</strong></button>`).join(''):''}
+        </div>
+      </section>`:''}
+
+      ${waitingCustomer.length?`<section class="adminpanel">
+        <div class="adminsectionhead"><h3>بانتظار العميل</h3><small>${waitingCustomer.length}</small></div>
+        <div class="stack">
+          ${waitingCustomer.slice(0,8).map(x=>`<button class="row" data-admin-order="${x.id}">
+            <span><b>${x.public_code}</b><small>معلومات مطلوبة غير مكتملة</small></span><i>بانتظار العميل</i>
+          </button>`).join('')}
+        </div>
+      </section>`:''}
+
       <section class="adminpanel">
         <div class="adminsectionhead"><h3>آخر الطلبات</h3><button data-go="admin/orders">عرض الكل</button></div>
         <div class="stack">${(o||[]).slice(0,6).map(x=>`<button class="row" data-admin-order="${x.id}">
