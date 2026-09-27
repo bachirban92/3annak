@@ -293,6 +293,28 @@ async function agentEarningsPage(){
   bind();
 }
 
+async function notificationsPage(){
+  clearLive();
+  if(isAnonymousUser())return go('home');
+  const {data,error}=await supabase.from('notifications').select('*').eq('user_id',session.user.id).order('created_at',{ascending:false}).limit(100);
+  if(error)return toast(error.message,true);
+  const rows=data||[];
+  const unread=rows.filter(x=>!x.read_at).length;
+
+  app.innerHTML=shell(`<section class="role-dashboard">
+    ${profile?.role==='customer'?customerNav():profile?.role==='agent'?agentNav():''}
+    <div class="title"><div><h2>الإشعارات</h2><small>${unread?unread+' غير مقروء':'لا يوجد جديد'}</small></div><button data-go="account">رجوع</button></div>
+    ${unread?`<button class="secondary compact" data-read-all-notifications>تعليم الكل كمقروء</button>`:''}
+    <div class="stack">
+      ${rows.map(n=>`<div class="notice ${n.read_at?'':'unread'}">
+        <b>${esc(n.title)}</b>
+        <small>${esc(n.body||'')}</small>
+        <small>${new Date(n.created_at).toLocaleString('ar-LB')}</small>
+      </div>`).join('')||'<div class="empty">لا توجد إشعارات.</div>'}
+    </div>
+  </section>`);
+  bind();
+}
 async function accountPage(){
   clearLive();
   if(isAnonymousUser())return go('home');
@@ -348,6 +370,7 @@ async function accountPage(){
       <button class="account-link" data-go="payments"><span><b>الدفع</b><small>سجل الدفع وطرق الدفع عند تفعيلها</small></span><span>›</span></button>
       <button class="account-link" data-go="properties"><span><b>عقاراتي</b><small>العقارات المحفوظة لإعادة الطلب بسرعة</small></span><span>›</span></button>
       <button class="account-link" data-go="documents"><span><b>المستندات</b><small>كل المستندات النهائية</small></span><span>›</span></button>
+      <button class="account-link" data-go="notifications"><span><b>الإشعارات</b><small>تحديثات الطلبات والتنبيهات</small></span><span>›</span></button>
     </section>`:''}
 
     ${isAgent?`<section class="card">
@@ -382,6 +405,7 @@ async function accountPage(){
 
     <section class="card account-links">
       <button class="account-link" data-go="agent-earnings"><span><b>الأرباح والدفعات</b><small>الحركات والرصيد والدفعات</small></span><span>›</span></button>
+      <button class="account-link" data-go="notifications"><span><b>الإشعارات</b><small>طلبات جديدة وتحديثات الحساب</small></span><span>›</span></button>
     </section>`:''}
 
     <section class="card">
@@ -1171,6 +1195,10 @@ function render(){
   }
 
   if(r==='forgot-password')return forgotPasswordPage();
+  if(r==='notifications'){
+    if(anonymous||!['customer','agent'].includes(profile?.role))return go('home');
+    return notificationsPage();
+  }
 
   if(r==='customer'){
     if(anonymous)return customerAuthChoice();
@@ -1444,6 +1472,13 @@ function bind(){
     });
     busy(b,false);error?toast(error.message,true):(toast('تم حفظ بيانات التحويل'),accountPage());
   };
+
+  document.querySelectorAll('[data-read-all-notifications]').forEach(x=>x.onclick=async()=>{
+    busy(x,true);
+    const {error}=await supabase.from('notifications').update({read_at:new Date().toISOString()}).eq('user_id',session.user.id).is('read_at',null);
+    busy(x,false);
+    error?toast(error.message,true):notificationsPage();
+  });
 
   const accountProfileForm=document.querySelector('#accountProfileForm');
   if(accountProfileForm)accountProfileForm.onsubmit=async e=>{
