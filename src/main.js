@@ -5,7 +5,7 @@ import { renderServicesAdmin, bindServicesAdmin } from './service-admin.js';
 import { renderNewOrder, bindServiceSelection } from './order-form.js';
 
 const app=document.querySelector('#app');
-let session=null,profile=null,services=[],bundleItems=[],serviceRequirements=[],customerProperties=[],paymentsEnabled=false,liveChannel=null;
+let session=null,profile=null,services=[],bundleItems=[],serviceRequirements=[],customerProperties=[],customerAddresses=[],deliveryConfig={enabled:false,customer_fee:0,agent_payout:0},paymentsEnabled=false,liveChannel=null;
 let passwordRecoveryMode=location.hash.includes('type=recovery')||new URLSearchParams(location.search).get('password-reset')==='1';
 
 const labels={
@@ -54,15 +54,18 @@ async function load(){
     if(error){console.error(error);return}
     session=data.session;
   }
-  const [{data:p},{data:srv},{data:bundles},{data:reqCatalog},{data:savedProps},{data:paymentSetting}]=await Promise.all([
+  const [{data:p},{data:srv},{data:bundles},{data:reqCatalog},{data:savedProps},{data:savedAddresses},{data:deliverySetting},{data:paymentSetting}]=await Promise.all([
     supabase.from('profiles').select('*').eq('id',session.user.id).maybeSingle(),
     supabase.from('services').select('*').eq('active',true).order('sort_order'),
     supabase.from('service_bundle_items').select('*').order('sort_order'),
     supabase.from('service_requirements').select('*').eq('active',true).order('sort_order'),
     supabase.from('customer_properties').select('*').order('is_default',{ascending:false}).order('created_at',{ascending:false}),
+    supabase.from('customer_addresses').select('*').order('is_default',{ascending:false}).order('created_at',{ascending:false}),
+    supabase.from('app_settings').select('value').eq('key','hard_copy_delivery').maybeSingle(),
     supabase.from('app_settings').select('value').eq('key','payments_enforced').maybeSingle()
   ]);
-  profile=p;services=srv||[];bundleItems=bundles||[];serviceRequirements=reqCatalog||[];customerProperties=savedProps||[];
+  profile=p;services=srv||[];bundleItems=bundles||[];serviceRequirements=reqCatalog||[];customerProperties=savedProps||[];customerAddresses=savedAddresses||[];
+  deliveryConfig=deliverySetting?.value||{enabled:false,customer_fee:0,agent_payout:0};
   paymentsEnabled=paymentSetting?.value?.enabled===true;
 }
 function home(){
@@ -487,7 +490,7 @@ function resetPasswordPage(){
 function newOrder(){
   if(isAnonymousUser())return customerAuthChoice();
   if(profile?.role!=='customer')return profile?.role==='agent'?agentPortal():go('admin');
-  return shell(renderNewOrder({services,bundleItems,serviceRequirements,savedProperties:customerProperties,profile,gov,esc,money}));
+  return shell(renderNewOrder({services,bundleItems,serviceRequirements,savedProperties:customerProperties,savedAddresses:customerAddresses,deliveryConfig,profile,gov,esc,money}));
 }
 async function orders(){
   clearLive();
@@ -1865,7 +1868,7 @@ function bind(){
     customerDetail(supportForm.dataset.orderId);
   };
 
-  bindServiceSelection({services,bundleItems,serviceRequirements,savedProperties:customerProperties,money,toast});
+  bindServiceSelection({services,bundleItems,serviceRequirements,savedProperties:customerProperties,savedAddresses:customerAddresses,deliveryConfig,money,toast});
   const order=document.querySelector('#order');
   if(order)order.onsubmit=async e=>{
     e.preventDefault();
@@ -1891,7 +1894,9 @@ function bind(){
       p_property_number:f.get('property_number'),
       p_property_section:f.get('property_section')||'',
       p_notes:f.get('notes')||'',
-      p_service_codes:f.getAll('service')
+      p_service_codes:f.getAll('service'),
+      p_delivery_mode:f.get('delivery_mode')||'digital',
+      p_delivery_address_id:f.get('delivery_mode')==='hard_copy'?(f.get('delivery_address_id')||null):null
     });
 
     if(error){busy(b,false);return toast(error.message,true)}
