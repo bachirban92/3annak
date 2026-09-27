@@ -29,7 +29,6 @@ export function renderNewOrder({services,bundleItems,serviceRequirements,profile
       <section class="flowstep">
         <div class="stephead"><span>1</span><div><b>اختر الخدمة</b><small>اختر مستنداً أو أكثر، أو حزمة كاملة.</small></div></div>
         <div class="servicegrid">${cards}</div>
-        <div id="bundleRecommendation" class="bundle-recommendation" hidden></div>
       </section>
 
       <section class="flowstep orderdetails" id="orderDetails" hidden>
@@ -93,7 +92,6 @@ export function bindServiceSelection({services,bundleItems,serviceRequirements,m
   const reviewTotal=form.querySelector('#reviewTotal');
   const reqSection=form.querySelector('#preorderRequirementsSection');
   const reqContainer=form.querySelector('#preorderRequirements');
-  const bundleRecommendation=form.querySelector('#bundleRecommendation');
   const byCode=Object.fromEntries(services.map(s=>[s.code,s]));
   const bundleMap={};
 
@@ -124,46 +122,6 @@ export function bindServiceSelection({services,bundleItems,serviceRequirements,m
   };
 
   const escAttr=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-
-  const updateBundleRecommendation=chosen=>{
-    bundleRecommendation.hidden=true;
-    bundleRecommendation.innerHTML='';
-
-    if(chosen.length<2||chosen.some(s=>s.service_type==='bundle'))return;
-
-    const chosenIds=new Set(chosen.map(s=>s.id));
-    const chosenTotal=chosen.reduce((sum,s)=>sum+Number(s.customer_price||0)+Number(s.official_fee||0),0);
-
-    const candidates=services
-      .filter(s=>s.service_type==='bundle')
-      .map(bundle=>{
-        const memberIds=new Set(bundleMap[bundle.id]||[]);
-        const covers=[...chosenIds].every(id=>memberIds.has(id));
-        const bundleTotal=Number(bundle.customer_price||0)+Number(bundle.official_fee||0);
-        return {bundle,memberIds,covers,bundleTotal,saving:chosenTotal-bundleTotal};
-      })
-      .filter(x=>x.covers&&x.saving>0)
-      .sort((a,b)=>b.saving-a.saving);
-
-    const best=candidates[0];
-    if(!best)return;
-
-    const extra=[...best.memberIds].filter(id=>!chosenIds.has(id)).length;
-    bundleRecommendation.innerHTML=`
-      <div>
-        <b>وفّر ${money(best.saving)}</b>
-        <small>${escAttr(best.bundle.name_ar)} أرخص من اختيارك الحالي${extra? ` ويشمل ${extra} مستند إضافي`:''}.</small>
-      </div>
-      <button type="button" class="secondary compact" data-use-bundle="${escAttr(best.bundle.code)}">اختيار الحزمة</button>`;
-    bundleRecommendation.hidden=false;
-
-    const use=bundleRecommendation.querySelector('[data-use-bundle]');
-    if(use)use.onclick=()=>{
-      checks.forEach(x=>x.checked=x.value===best.bundle.code);
-      refresh(checks.find(x=>x.value===best.bundle.code));
-      form.querySelector('[data-service-card="'+CSS.escape(best.bundle.code)+'"]')?.scrollIntoView({behavior:'smooth',block:'center'});
-    };
-  };
 
   const renderReqs=reqs=>{
     if(!reqs.length){
@@ -238,13 +196,10 @@ export function bindServiceSelection({services,bundleItems,serviceRequirements,m
     if(!active){
       reqSection.hidden=true;
       reqContainer.innerHTML='';
-      bundleRecommendation.hidden=true;
-      bundleRecommendation.innerHTML='';
       return;
     }
 
     const chosen=selected.map(x=>byCode[x.value]).filter(Boolean);
-    updateBundleRecommendation(chosen);
     const reqs=selectedRequirements(chosen);
     renderReqs(reqs);
 
