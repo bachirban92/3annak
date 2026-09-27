@@ -313,3 +313,21 @@ h3{margin:26px 0 11px;font-size:19px}
   .order-dashboard-row{flex-direction:column}
   .order-dashboard-state{text-align:right;min-width:0;width:100%}
 }
+
+.delivery-choice{display:grid;gap:10px}
+.delivery-option{display:flex;justify-content:space-between;align-items:center;gap:12px;border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff;cursor:pointer}
+.delivery-option input{width:auto}
+.delivery-option>span{display:grid;gap:3px;flex:1}
+.delivery-option small{color:var(--muted)}
+.delivery-option.selected{border-width:2px}
+#deliveryAddressWrap{margin-top:10px}
+.delivery-task{display:flex;justify-content:space-between;align-items:center;gap:12px;border:2px solid var(--line);border-radius:14px;padding:14px;background:#fff}
+.delivery-task>div{display:grid;gap:4px}
+.delivery-task small{color:var(--muted)}
+.delivery-task span{overflow-wrap:anywhere}
+.delivery-task.done{border-width:1px;background:#f7f7f7}
+@media(max-width:620px){
+  .delivery-option{align-items:flex-start}
+  .delivery-task{align-items:flex-start;flex-direction:column}
+  .delivery-task button{width:100%}
+}
