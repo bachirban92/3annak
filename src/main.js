@@ -147,10 +147,11 @@ async function customerDetail(id){
 
       <h3>الدعم</h3>
       ${feedback?.dispute && ['open','reviewing'].includes(feedback.dispute.status)
-        ?`<div class="feedbackdone"><b>طلب الدعم مفتوح</b><small>${esc(feedback.dispute.reason)}</small></div>`
-        :`<form id="supportForm" data-order-id="${o.id}" class="feedbackform">
+        ?`<div class="feedbackdone"><b>${feedback.dispute.status==='reviewing'?'طلب الدعم قيد المراجعة':'طلب الدعم مفتوح'}</b><small>${esc(feedback.dispute.reason)}</small></div>`
+        :`${feedback?.dispute?.resolution?`<div class="feedbackdone"><b>رد الإدارة</b><small>${esc(feedback.dispute.resolution)}</small></div>`:''}
+          <form id="supportForm" data-order-id="${o.id}" class="feedbackform">
             <textarea name="reason" required minlength="3" placeholder="اشرح المشكلة باختصار"></textarea>
-            <button class="secondary full">طلب دعم</button>
+            <button class="secondary full">طلب دعم جديد</button>
           </form>`}
     `:''}
 
