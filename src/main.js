@@ -5,7 +5,7 @@ import { renderServicesAdmin, bindServicesAdmin } from './service-admin.js';
 import { renderNewOrder, bindServiceSelection } from './order-form.js';
 
 const app=document.querySelector('#app');
-let session=null,profile=null,services=[],bundleItems=[],liveChannel=null;
+let session=null,profile=null,services=[],bundleItems=[],serviceRequirements=[],liveChannel=null;
 
 const labels={
   submitted:'تم استلام الطلب',
@@ -53,12 +53,13 @@ async function load(){
     if(error){console.error(error);return}
     session=data.session;
   }
-  const [{data:p},{data:srv},{data:bundles}]=await Promise.all([
+  const [{data:p},{data:srv},{data:bundles},{data:reqCatalog}]=await Promise.all([
     supabase.from('profiles').select('*').eq('id',session.user.id).maybeSingle(),
     supabase.from('services').select('*').eq('active',true).order('sort_order'),
-    supabase.from('service_bundle_items').select('*').order('sort_order')
+    supabase.from('service_bundle_items').select('*').order('sort_order'),
+    supabase.from('service_requirements').select('*').eq('active',true).order('sort_order')
   ]);
-  profile=p;services=srv||[];bundleItems=bundles||[];
+  profile=p;services=srv||[];bundleItems=bundles||[];serviceRequirements=reqCatalog||[];
 }
 function home(){
   return shell(`<section class="hero rolehome">
@@ -258,7 +259,7 @@ function resetPasswordPage(){
 function newOrder(){
   if(isAnonymousUser())return customerAuthChoice();
   if(profile?.role!=='customer')return profile?.role==='agent'?agentPortal():go('admin');
-  return shell(renderNewOrder({services,bundleItems,profile,gov,esc,money}));
+  return shell(renderNewOrder({services,bundleItems,serviceRequirements,profile,gov,esc,money}));
 }
 async function orders(){
   clearLive();
@@ -1269,22 +1270,125 @@ function bind(){
     customerDetail(supportForm.dataset.orderId);
   };
 
-  bindServiceSelection({services,money,toast});
+  bindServiceSelection({services,bundleItems,serviceRequirements,money,toast});
   const order=document.querySelector('#order');
   if(order)order.onsubmit=async e=>{
-    e.preventDefault();const f=new FormData(order),b=order.querySelector('button');busy(b,true);
-    const contact=await supabase.rpc('update_my_profile',{p_full_name:f.get('name')||'',p_phone:f.get('phone')||'',p_locale:'ar',p_email:f.get('email')||''});
+    e.preventDefault();
+    const f=new FormData(order),b=order.querySelector('#orderSubmit')||order.querySelector('button');
+    busy(b,true,'جارٍ إنشاء الطلب...');
+
+    const contact=await supabase.rpc('update_my_profile',{
+      p_full_name:f.get('name')||'',
+      p_phone:f.get('phone')||'',
+      p_locale:'ar',
+      p_email:f.get('email')||''
+    });
     if(contact.error){busy(b,false);return toast(contact.error.message,true)}
     profile=contact.data;
+
     const {data,error}=await supabase.rpc('create_order',{
-      p_customer_name:f.get('name')||'',p_customer_phone:f.get('phone'),p_customer_email:f.get('email')||'',
-      p_governorate:f.get('governorate'),p_district:f.get('district')||'',p_cadastral_area:f.get('cadastral_area'),
-      p_property_number:f.get('property_number'),p_property_section:f.get('property_section')||'',p_notes:f.get('notes')||'',
+      p_customer_name:f.get('name')||'',
+      p_customer_phone:f.get('phone'),
+      p_customer_email:f.get('email')||'',
+      p_governorate:f.get('governorate'),
+      p_district:f.get('district')||'',
+      p_cadastral_area:f.get('cadastral_area'),
+      p_property_number:f.get('property_number'),
+      p_property_section:f.get('property_section')||'',
+      p_notes:f.get('notes')||'',
       p_service_codes:f.getAll('service')
     });
+
+    if(error){busy(b,false);return toast(error.message,true)}
+
+    const orderId=data?.[0]?.order_id;
+    if(!orderId){busy(b,false);return toast('تعذر إنشاء الطلب',true)}
+
+    const {data:orderReqs,error:reqError}=await supabase
+      .from('order_requirements')
+      .select('*')
+      .eq('order_id',orderId);
+
+    if(reqError){
+      busy(b,false);
+      toast('تم إنشاء الطلب، لكن تعذر حفظ بعض المتطلبات',true);
+      return customerDetail(orderId);
+    }
+
+    for(const req of orderReqs||[]){
+      const input=order.querySelector(`[data-pre-req-code="${CSS.escape(req.code)}"]`);
+      if(!input)continue;
+
+      if(req.requirement_type==='text'){
+        const value=String(input.value||'').trim();
+        if(!value)continue;
+        const done=await supabase.rpc('complete_order_requirement',{
+          p_order_requirement_id:req.id,
+          p_value_text:value,
+          p_document_id:null
+        });
+        if(done.error){
+          busy(b,false);
+          toast('تم إنشاء الطلب، لكن تعذر حفظ '+req.label_ar,true);
+          return customerDetail(orderId);
+        }
+      }else if(req.requirement_type==='file'){
+        const file=input.files?.[0];
+        if(!file)continue;
+        if(file.size>10*1024*1024){
+          busy(b,false);
+          toast('تم إنشاء الطلب، لكن الملف أكبر من 10MB',true);
+          return customerDetail(orderId);
+        }
+        if(!['application/pdf','image/jpeg','image/png','image/webp'].includes(file.type)){
+          busy(b,false);
+          toast('تم إنشاء الطلب، لكن نوع الملف غير مدعوم',true);
+          return customerDetail(orderId);
+        }
+
+        const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+        const path=orderId+'/'+crypto.randomUUID()+'-'+safe;
+        const up=await supabase.storage.from('order-files').upload(path,file);
+        if(up.error){
+          busy(b,false);
+          toast('تم إنشاء الطلب، لكن تعذر رفع '+req.label_ar,true);
+          return customerDetail(orderId);
+        }
+
+        const ins=await supabase.from('documents').insert({
+          order_id:orderId,
+          kind:'customer_attachment',
+          storage_path:path,
+          original_name:file.name,
+          mime_type:file.type,
+          file_size:file.size,
+          visible_to_customer:true,
+          uploaded_by:session.user.id
+        }).select('id').single();
+
+        if(ins.error){
+          await supabase.storage.from('order-files').remove([path]);
+          busy(b,false);
+          toast('تم إنشاء الطلب، لكن تعذر حفظ '+req.label_ar,true);
+          return customerDetail(orderId);
+        }
+
+        const done=await supabase.rpc('complete_order_requirement',{
+          p_order_requirement_id:req.id,
+          p_value_text:null,
+          p_document_id:ins.data.id
+        });
+        if(done.error){
+          busy(b,false);
+          toast('تم إنشاء الطلب، لكن تعذر إكمال '+req.label_ar,true);
+          return customerDetail(orderId);
+        }
+      }
+    }
+
     busy(b,false);
-    if(error)toast(error.message,true);
-    else{toast('تم إنشاء الطلب');customerDetail(data?.[0]?.order_id)}
+    toast('تم تأكيد الطلب');
+    customerDetail(orderId);
   };
 
   const join=document.querySelector('#agentJoin');
