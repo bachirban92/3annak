@@ -79,7 +79,7 @@ function newOrder(){
         <input name="property_number" required placeholder="رقم العقار">
       </div>
       <div class="services">
-        ${services.map(s=>`<label><input type="radio" name="service" value="${s.code}" required><span><b>${esc(s.name_ar)}</b><em>${money(s.customer_price)}</em></span></label>`).join('')}
+        ${services.map(s=>`<label><input type="radio" name="service" value="${s.code}" required><span><b>${esc(s.name_ar)}</b><em>${money(Number(s.customer_price||0)+Number(s.official_fee||0))}</em></span></label>`).join('')}
       </div>
       <input name="name" value="${esc(profile?.full_name)}" placeholder="الاسم">
       <input name="email" type="email" value="${esc(profile?.email)}" required placeholder="البريد الإلكتروني">
@@ -369,12 +369,14 @@ function bind(){
     const contact=await supabase.rpc('update_my_profile',{p_full_name:f.get('name')||'',p_phone:f.get('phone')||'',p_locale:'ar',p_email:f.get('email')||''});
     if(contact.error){busy(b,false);return toast(contact.error.message,true)}
     profile=contact.data;
-    const {error}=await supabase.rpc('create_order',{
+    const {data,error}=await supabase.rpc('create_order',{
       p_customer_name:f.get('name')||'',p_customer_phone:f.get('phone'),p_customer_email:f.get('email')||'',
       p_governorate:f.get('governorate'),p_district:f.get('district')||'',p_cadastral_area:f.get('cadastral_area'),
       p_property_number:f.get('property_number'),p_property_section:'',p_notes:f.get('notes')||'',p_service_codes:[f.get('service')]
     });
-    busy(b,false);error?toast(error.message,true):(toast('تم إرسال الطلب'),go('orders'));
+    busy(b,false);
+    if(error)toast(error.message,true);
+    else{toast('تم إنشاء الطلب');customerDetail(data?.[0]?.order_id)}
   };
 
   const join=document.querySelector('#agentJoin');
