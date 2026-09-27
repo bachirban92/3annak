@@ -303,7 +303,7 @@ async function accountPage(){
   const [agentRes,coverageRes,addressRes,payoutRes]=await Promise.all([
     isAgent?supabase.from('agent_profiles').select('*').eq('user_id',session.user.id).maybeSingle():Promise.resolve({data:null}),
     isAgent?supabase.from('agent_coverage').select('*').eq('agent_id',session.user.id).eq('active',true):Promise.resolve({data:[]}),
-    isCustomer?supabase.from('customer_addresses').select('*').order('is_default',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]}),
+    (isCustomer||isAgent)?supabase.from('customer_addresses').select('*').order('is_default',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]}),
     isAgent?supabase.from('agent_payout_accounts').select('*').eq('user_id',session.user.id).maybeSingle():Promise.resolve({data:null})
   ]);
 
@@ -330,8 +330,8 @@ async function accountPage(){
       </form>
     </section>
 
-    ${isCustomer?`<section class="card">
-      <div class="dashboard-panel-head"><h3>العناوين</h3><button class="secondary compact" data-add-address>إضافة عنوان</button></div>
+    ${(isCustomer||isAgent)?`<section class="card">
+      <div class="dashboard-panel-head"><h3>${isAgent?'العنوان الشخصي':'العناوين'}</h3><button class="secondary compact" data-add-address>إضافة عنوان</button></div>
       <div class="stack">
         ${addresses.map(a=>`<div class="account-list-row">
           <div><b>${esc(a.label)}</b><small>${esc(a.address_line1)} • ${esc(a.city)}${a.is_default?' • افتراضي':''}</small></div>
