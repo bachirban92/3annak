@@ -31,12 +31,16 @@ function toast(msg,bad=false){
   clearTimeout(window.__toast);window.__toast=setTimeout(()=>x.classList.remove('show'),3000);
 }
 function clearLive(){if(liveChannel){supabase.removeChannel(liveChannel);liveChannel=null}}
-function shell(body){
-  let right='';
+const isAnonymousUser=()=>{
   const u=session?.user;
-  const anonymous=u?.is_anonymous===true
+  return u?.is_anonymous===true
     || u?.app_metadata?.provider==='anonymous'
     || (!u?.email&&!u?.phone&&(!u?.identities||u.identities.length===0));
+};
+
+function shell(body){
+  let right='';
+  const anonymous=isAnonymousUser();
   if(profile?.role==='agent') right='';
   else if(profile?.role==='admin') right=`<button class="toplink withicon" data-go="admin">${icon('settings')}<span>الإدارة</span></button>`;
   else if(!anonymous) right=`<button class="toplink withicon" data-go="orders">${icon('orders')}<span>طلباتي</span></button>`;
@@ -62,9 +66,9 @@ function home(){
     <small>عنّك</small>
     <h1>كيف بدك تستخدم المنصة؟</h1>
     <div class="rolechoices">
-      <button class="rolecard" data-go="new">
+      <button class="rolecard" data-go="customer">
         <span class="roleicon">${icon('orders')}</span>
-        <span><b>أنا عميل</b><small>بدي أطلب مستندات لعقار</small></span>
+        <span><b>أنا عميل</b><small>بدي أطلب وأتابع مستندات عقاري</small></span>
       </button>
       <button class="rolecard" data-go="agent">
         <span class="roleicon">${icon('briefcase')}</span>
@@ -73,7 +77,56 @@ function home(){
     </div>
   </section>`);
 }
+function customerAuthChoice(){
+  app.innerHTML=shell(`<section class="card narrow agentauth">
+    <div class="title"><h2>حساب العميل</h2><button data-go="home">رجوع</button></div>
+    <button class="primary full" data-go="customer-login">دخول</button>
+    <button class="secondary full" data-go="customer-register">إنشاء حساب</button>
+  </section>`);
+  bind();
+}
+
+function customerLogin(){
+  app.innerHTML=shell(`<section class="card narrow">
+    <div class="title"><h2>دخول العميل</h2><button data-go="customer">رجوع</button></div>
+    <form id="customerLogin">
+      <input name="email" type="email" autocomplete="username" required placeholder="البريد الإلكتروني">
+      <input name="password" type="password" autocomplete="current-password" required placeholder="كلمة المرور">
+      <button class="primary full">دخول</button>
+    </form>
+  </section>`);
+  bind();
+}
+
+function customerRegister(){
+  app.innerHTML=shell(`<section class="card narrow">
+    <div class="title"><h2>إنشاء حساب عميل</h2><button data-go="customer">رجوع</button></div>
+    <form id="customerRegister">
+      <input name="name" required placeholder="الاسم">
+      <input name="email" type="email" autocomplete="username" required placeholder="البريد الإلكتروني">
+      <input name="phone" required placeholder="رقم الهاتف">
+      <input name="password" type="password" minlength="8" autocomplete="new-password" required placeholder="كلمة المرور">
+      <button class="primary full">إنشاء الحساب</button>
+    </form>
+  </section>`);
+  bind();
+}
+
+function customerPortal(){
+  if(isAnonymousUser())return customerAuthChoice();
+  if(profile?.role==='agent')return agentPortal();
+  if(profile?.role==='admin')return go('admin');
+
+  app.innerHTML=shell(`<section class="card narrow customerportal">
+    <div class="title"><div><h2>حسابي</h2><small>${esc(profile?.full_name||session?.user?.email||'')}</small></div><button data-customer-logout>خروج</button></div>
+    <button class="primary full" data-go="new">طلب جديد</button>
+    <button class="secondary full" data-go="orders">طلباتي</button>
+  </section>`);
+  bind();
+}
+
 function newOrder(){
+  if(isAnonymousUser())return customerAuthChoice();
   return shell(renderNewOrder({services,bundleItems,profile,gov,esc,money}));
 }
 async function orders(){
@@ -199,7 +252,7 @@ async function agentPortal(){
   clearLive();
   const {data:a}=await supabase.from('agent_profiles').select('*').eq('user_id',session.user.id).maybeSingle();
 
-  if(!a && session.user?.is_anonymous){
+  if(!a && isAnonymousUser()){
     return agentAuthChoice();
   }
 
@@ -619,8 +672,18 @@ function render(){
     return bind();
   }
   const r=location.hash.slice(1)||'home';
-  if(r==='new')app.innerHTML=newOrder();
-  else if(r==='orders')return orders();
+  if(r==='customer')return customerPortal();
+  else if(r==='customer-login'){app.innerHTML='';return customerLogin();}
+  else if(r==='customer-register'){app.innerHTML='';return customerRegister();}
+  else if(r==='new'){
+    const out=newOrder();
+    if(typeof out==='string')app.innerHTML=out;
+    else return out;
+  }
+  else if(r==='orders'){
+    if(isAnonymousUser())return customerAuthChoice();
+    return orders();
+  }
   else if(r==='agent')return agentPortal();
   else if(r==='agent-login'){app.innerHTML='';return agentLogin();}
   else if(r==='agent-register'){app.innerHTML='';return agentRegister();}
@@ -635,6 +698,67 @@ function render(){
 }
 function bind(){
   document.querySelectorAll('[data-go]').forEach(x=>x.onclick=()=>go(x.dataset.go));
+
+  const customerLoginForm=document.querySelector('#customerLogin');
+  if(customerLoginForm)customerLoginForm.onsubmit=async e=>{
+    e.preventDefault();
+    const f=new FormData(customerLoginForm),b=customerLoginForm.querySelector('button');
+    busy(b,true,'جارٍ الدخول...');
+    await supabase.auth.signOut();
+    const {data,error}=await supabase.auth.signInWithPassword({
+      email:String(f.get('email')||'').trim(),
+      password:String(f.get('password')||'')
+    });
+    if(error){busy(b,false);return toast('البريد أو كلمة المرور غير صحيحة.',true)}
+    session=data.session;
+    await load();
+    busy(b,false);
+    if(profile?.role==='agent'){toast('هذا حساب وكيل');return go('agent')}
+    if(profile?.role==='admin')return go('admin');
+    toast('تم تسجيل الدخول');
+    go('orders');
+  };
+
+  const customerRegisterForm=document.querySelector('#customerRegister');
+  if(customerRegisterForm)customerRegisterForm.onsubmit=async e=>{
+    e.preventDefault();
+    const f=new FormData(customerRegisterForm),b=customerRegisterForm.querySelector('button');
+    const email=String(f.get('email')||'').trim();
+    const password=String(f.get('password')||'');
+    busy(b,true,'جارٍ إنشاء الحساب...');
+    await supabase.auth.signOut();
+    const {data,error}=await supabase.auth.signUp({
+      email,
+      password,
+      options:{data:{full_name:String(f.get('name')||''),phone:String(f.get('phone')||'')}}
+    });
+    if(error){busy(b,false);return toast(error.message,true)}
+    if(!data.session){
+      busy(b,false);
+      app.innerHTML=shell('<section class="card narrow pending"><h2>تم إنشاء الحساب</h2><p>افتح بريدك لتأكيد الحساب، ثم سجّل الدخول لمتابعة طلباتك.</p><button class="primary full" data-go="customer-login">دخول العميل</button></section>');
+      return bind();
+    }
+    session=data.session;
+    await load();
+    const contact=await supabase.rpc('update_my_profile',{
+      p_full_name:f.get('name'),
+      p_phone:f.get('phone'),
+      p_locale:'ar',
+      p_email:email
+    });
+    busy(b,false);
+    if(contact.error)return toast(contact.error.message,true);
+    await load();
+    toast('تم إنشاء الحساب');
+    go('new');
+  };
+
+  document.querySelectorAll('[data-customer-logout]').forEach(x=>x.onclick=async()=>{
+    await supabase.auth.signOut();
+    session=null;profile=null;
+    await load();
+    go('home');
+  });
 
   const agentLoginForm=document.querySelector('#agentLogin');
   if(agentLoginForm)agentLoginForm.onsubmit=async e=>{
