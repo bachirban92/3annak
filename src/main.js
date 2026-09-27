@@ -278,74 +278,104 @@ async function customerDetail(id){
     supabase.from('payments').select('*').eq('order_id',id).order('created_at',{ascending:false}).limit(1)
   ]);
   if(error)return toast(error.message,true);
+
   const incompleteRequired=(reqs||[]).filter(r=>r.required&&!r.completed_at);
+  const finalDocs=(d||[]).filter(x=>x.kind==='final_document');
   const payment=payments?.[0];
   const paymentLabel=o.refund_pending?'رد المبلغ قيد المعالجة':
     payment?.status==='paid'?'مدفوع':
     payment?.status==='refunded'?'تم رد المبلغ':
     payment?.status==='failed'?'فشل الدفع':'بانتظار الدفع';
-  app.innerHTML=shell(`<section class="card">
-    <div class="title"><h2>${o.public_code}</h2><button data-go="orders">رجوع</button></div>
-    <div class="summary">
-      <b>${esc(o.cadastral_area)} • عقار ${esc(o.property_number)}</b>
-      <span>${(i||[]).map(x=>esc(x.service_name_ar)).join('، ')}</span>
-      <strong>${money(o.total_amount)}</strong>
+
+  app.innerHTML=shell(`<section class="order-detail">
+    <div class="title"><div><small>الطلب</small><h2>${o.public_code}</h2></div><button data-go="orders">رجوع</button></div>
+
+    <div class="order-status-card">
+      <div><small>الحالة</small><b>${labels[o.status]||o.status}</b></div>
+      ${o.expected_ready_at&&o.status!=='completed'? `<div><small>التاريخ المتوقع</small><b>${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}</b></div>`:''}
+      <div><small>الإجمالي</small><b>${money(o.total_amount)}</b></div>
     </div>
+
+    <section class="dashboard-panel">
+      <div class="order-core-grid">
+        <div><small>العقار</small><b>${esc(o.cadastral_area)} • ${esc(o.property_number)}</b></div>
+        <div><small>الخدمة</small><b>${(i||[]).map(x=>esc(x.service_name_ar)).join('، ')}</b></div>
+      </div>
+      ${(deliverables||[]).length?`<div class="deliverables compact"><small>المستندات المطلوبة</small><div>${deliverables.map(x=>`<span>${esc(x.service_name_ar)}</span>`).join('')}</div></div>`:''}
+    </section>
+
     ${(paymentsEnabled||o.refund_pending||['paid','refunded','partially_refunded'].includes(payment?.status))?`<div class="paymentbox">
       <div><small>الدفع</small><b>${paymentLabel}</b></div>
       <strong>${money(payment?.amount??o.total_amount)}</strong>
     </div>`:''}
-    ${o.status==='completed'?`<div class="completebox"><span class="completecheck">✓</span><div><b>اكتمل الطلب</b><small>مستنداتك جاهزة أدناه.</small></div></div>`:''}
-    ${incompleteRequired.length?`<div class="completebox requirementgate"><span class="completecheck">!</span><div><b>أكمل المعلومات المطلوبة</b><small>لن يظهر الطلب للوكلاء قبل إكمال ${incompleteRequired.length} عنصر مطلوب.</small></div></div>`:''}
-    ${(deliverables||[]).length?`<div class="deliverables"><small>المستندات المطلوبة</small><div>${deliverables.map(x=>`<span>${esc(x.service_name_ar)}</span>`).join('')}</div></div>`:''}
-    ${renderRequirements(reqs||[])}
-    ${o.expected_ready_at&&o.status!=='completed'?`<div class="eta"><small>الوقت المتوقع</small><b>${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}</b></div>`:''}
 
-    ${o.status==='completed'?`
-      <h3>المستندات النهائية</h3>
+    ${incompleteRequired.length?`<div class="completebox requirementgate">
+      <span class="completecheck">!</span>
+      <div><b>أكمل المعلومات المطلوبة</b><small>باقي ${incompleteRequired.length} عنصر مطلوب قبل إرسال الطلب للوكلاء.</small></div>
+    </div>`:''}
+
+    ${finalDocs.length?`<section class="dashboard-panel">
+      <div class="dashboard-panel-head"><h3>المستندات</h3><small>${finalDocs.length}</small></div>
       <div class="document-list">
-        ${(d||[]).filter(x=>x.kind==='final_document').map(x=>`<div class="document-row">
+        ${finalDocs.map(x=>`<div class="document-row">
           <div><b>${esc(x.original_name||'مستند')}</b><small>${esc(x.mime_type||'')}</small></div>
           <div class="document-actions">
             <button class="secondary compact" data-file-view="${esc(x.storage_path)}">عرض</button>
             <button class="secondary compact" data-file-download="${esc(x.storage_path)}">تنزيل</button>
           </div>
-        </div>`).join('')||'<div class="empty">لا يوجد مستند نهائي مرفوع بعد.</div>'}
+        </div>`).join('')}
       </div>
+    </section>`:''}
 
-      <h3>التقييم</h3>
-      ${feedback?.rating
-        ?`<div class="feedbackdone"><b>${'★'.repeat(Number(feedback.rating.rating||0))}</b><small>${esc(feedback.rating.comment||'تم إرسال تقييمك.')}</small></div>`
-        :`<form id="ratingForm" data-order-id="${o.id}" class="feedbackform">
-            <select name="rating" required>
-              <option value="">اختر التقييم</option>
-              <option value="5">★★★★★</option>
-              <option value="4">★★★★</option>
-              <option value="3">★★★</option>
-              <option value="2">★★</option>
-              <option value="1">★</option>
-            </select>
-            <textarea name="comment" placeholder="ملاحظة (اختياري)"></textarea>
-            <button class="secondary full">إرسال التقييم</button>
-          </form>`}
+    ${(reqs||[]).length?`<details class="order-section" ${incompleteRequired.length?'open':''}>
+      <summary>بيانات ومتطلبات الطلب</summary>
+      <div class="order-section-body">${renderRequirements(reqs||[])}</div>
+    </details>`:''}
 
-      <h3>الدعم</h3>
-      ${feedback?.dispute && ['open','reviewing'].includes(feedback.dispute.status)
-        ?`<div class="feedbackdone"><b>${feedback.dispute.status==='reviewing'?'طلب الدعم قيد المراجعة':'طلب الدعم مفتوح'}</b><small>${esc(feedback.dispute.reason)}</small></div>`
-        :`${feedback?.dispute?.resolution?`<div class="feedbackdone"><b>رد الإدارة</b><small>${esc(feedback.dispute.resolution)}</small></div>`:''}
-          <form id="supportForm" data-order-id="${o.id}" class="feedbackform">
-            <textarea name="reason" required minlength="3" placeholder="اشرح المشكلة باختصار"></textarea>
-            <button class="secondary full">طلب دعم جديد</button>
-          </form>`}
-    `:''}
+    <details class="order-section">
+      <summary>التتبّع</summary>
+      <div class="order-section-body timeline">${(e||[]).map(x=>`<div><b>${esc(x.label_ar)}</b><small>${new Date(x.created_at).toLocaleString('ar-LB')}</small></div>`).join('')}</div>
+    </details>
 
-    <h3>التتبّع</h3>
-    <div class="timeline">${(e||[]).map(x=>`<div><b>${esc(x.label_ar)}</b><small>${new Date(x.created_at).toLocaleString('ar-LB')}</small></div>`).join('')}</div>
-    ${o.status!=='completed'?(d||[]).filter(x=>x.kind==='final_document').map(x=>`<button class="download full" data-download="${esc(x.storage_path)}">${esc(x.original_name||'فتح المستند')}</button>`).join(''):''}
+    ${o.status==='completed'?`<details class="order-section">
+      <summary>التقييم</summary>
+      <div class="order-section-body">
+        ${feedback?.rating
+          ?`<div class="feedbackdone"><b>${'★'.repeat(Number(feedback.rating.rating||0))}</b><small>${esc(feedback.rating.comment||'تم إرسال تقييمك.')}</small></div>`
+          :`<form id="ratingForm" data-order-id="${o.id}" class="feedbackform">
+              <select name="rating" required>
+                <option value="">اختر التقييم</option>
+                <option value="5">★★★★★</option>
+                <option value="4">★★★★</option>
+                <option value="3">★★★</option>
+                <option value="2">★★</option>
+                <option value="1">★</option>
+              </select>
+              <textarea name="comment" placeholder="ملاحظة (اختياري)"></textarea>
+              <button class="secondary full">إرسال التقييم</button>
+            </form>`}
+      </div>
+    </details>`:''}
+
+    ${o.status!=='cancelled'?`<details class="order-section">
+      <summary>الدعم</summary>
+      <div class="order-section-body">
+        ${feedback?.dispute&&['open','reviewing'].includes(feedback.dispute.status)
+          ?`<div class="feedbackdone"><b>${feedback.dispute.status==='reviewing'?'طلب الدعم قيد المراجعة':'طلب الدعم مفتوح'}</b><small>${esc(feedback.dispute.reason)}</small></div>`
+          :`${feedback?.dispute?.resolution?`<div class="feedbackdone"><b>رد الإدارة</b><small>${esc(feedback.dispute.resolution)}</small></div>`:''}
+            <form id="supportForm" data-order-id="${o.id}" class="feedbackform">
+              <textarea name="reason" required minlength="3" placeholder="اشرح المشكلة باختصار"></textarea>
+              <button class="secondary full">طلب دعم</button>
+            </form>`}
+      </div>
+    </details>`:''}
+
     ${o.status==='submitted'?`<button class="danger full" data-cancel="${o.id}">إلغاء الطلب</button>`:''}
   </section>`);
+
   bind();
   bindRequirementActions({toast,busy,reload:customerDetail});
+
   liveChannel=supabase.channel('customer-order-'+id)
     .on('postgres_changes',{event:'*',schema:'public',table:'order_events',filter:`order_id=eq.${id}`},()=>customerDetail(id))
     .on('postgres_changes',{event:'UPDATE',schema:'public',table:'orders',filter:`id=eq.${id}`},()=>customerDetail(id))
