@@ -112,17 +112,70 @@ function customerRegister(){
   bind();
 }
 
-function customerPortal(){
+async function customerPortal(){
+  clearLive();
   if(isAnonymousUser())return customerAuthChoice();
   if(profile?.role==='agent')return agentPortal();
   if(profile?.role==='admin')return go('admin');
 
-  app.innerHTML=shell(`<section class="card narrow customerportal">
-    <div class="title"><div><h2>حسابي</h2><small>${esc(profile?.full_name||session?.user?.email||'')}</small></div><button data-customer-logout>خروج</button></div>
-    <button class="primary full" data-go="new">طلب جديد</button>
-    <button class="secondary full" data-go="orders">طلباتي</button>
+  const [{data:allOrders,error},{data:notifications}]=await Promise.all([
+    supabase.from('orders').select('*').eq('customer_id',session.user.id).order('created_at',{ascending:false}),
+    supabase.from('notifications').select('*').eq('user_id',session.user.id).order('created_at',{ascending:false}).limit(5)
+  ]);
+  if(error)return toast(error.message,true);
+
+  const rows=allOrders||[];
+  const current=rows.filter(o=>!['completed','cancelled'].includes(o.status));
+  const completed=rows.filter(o=>o.status==='completed');
+  const recent=rows.slice(0,5);
+
+  app.innerHTML=shell(`<section class="customerdashboard">
+    <div class="customerbar">
+      <div>
+        <small>مرحباً</small>
+        <h2>${esc(profile?.full_name||session?.user?.email||'')}</h2>
+      </div>
+      <button class="ghost" data-customer-logout>خروج</button>
+    </div>
+
+    <div class="customermetrics">
+      <div><small>طلبات جارية</small><b>${current.length}</b></div>
+      <div><small>طلبات مكتملة</small><b>${completed.length}</b></div>
+      <div><small>كل الطلبات</small><b>${rows.length}</b></div>
+    </div>
+
+    <div class="customerquick">
+      <button class="primary" data-go="new">${icon('orders')}<span>طلب جديد</span></button>
+      <button class="secondary" data-go="orders">${icon('check')}<span>كل طلباتي</span></button>
+    </div>
+
+    <h3>الطلبات الجارية</h3>
+    <div class="stack">
+      ${current.slice(0,5).map(o=>`<button class="row" data-order="${o.id}">
+        <span><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span>
+        <i>${labels[o.status]||o.status}</i>
+      </button>`).join('')||'<div class="empty">لا يوجد طلبات جارية.</div>'}
+    </div>
+
+    <h3>آخر الطلبات</h3>
+    <div class="stack">
+      ${recent.map(o=>`<button class="row" data-order="${o.id}">
+        <span><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span>
+        <i>${labels[o.status]||o.status}</i>
+      </button>`).join('')||'<div class="empty">لم تنشئ أي طلب بعد.</div>'}
+    </div>
+
+    <h3 class="sectionicon">${icon('orders')}<span>آخر الإشعارات</span></h3>
+    <div class="stack">
+      ${(notifications||[]).map(n=>`<div class="notice ${n.read_at?'':'unread'}"><b>${esc(n.title)}</b><small>${esc(n.body)}</small></div>`).join('')||'<div class="empty">لا يوجد إشعارات.</div>'}
+    </div>
   </section>`);
   bind();
+
+  liveChannel=supabase.channel('customer-feed-'+session.user.id)
+    .on('postgres_changes',{event:'*',schema:'public',table:'orders',filter:`customer_id=eq.${session.user.id}`},()=>customerPortal())
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:`user_id=eq.${session.user.id}`},()=>customerPortal())
+    .subscribe();
 }
 
 function newOrder(){
