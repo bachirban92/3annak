@@ -5,7 +5,7 @@ import { renderServicesAdmin, bindServicesAdmin } from './service-admin.js';
 import { renderNewOrder, bindServiceSelection } from './order-form.js';
 
 const app=document.querySelector('#app');
-let session=null,profile=null,services=[],bundleItems=[],serviceRequirements=[],liveChannel=null;
+let session=null,profile=null,services=[],bundleItems=[],serviceRequirements=[],paymentsEnabled=false,liveChannel=null;
 
 const labels={
   submitted:'تم استلام الطلب',
@@ -53,13 +53,15 @@ async function load(){
     if(error){console.error(error);return}
     session=data.session;
   }
-  const [{data:p},{data:srv},{data:bundles},{data:reqCatalog}]=await Promise.all([
+  const [{data:p},{data:srv},{data:bundles},{data:reqCatalog},{data:paymentSetting}]=await Promise.all([
     supabase.from('profiles').select('*').eq('id',session.user.id).maybeSingle(),
     supabase.from('services').select('*').eq('active',true).order('sort_order'),
     supabase.from('service_bundle_items').select('*').order('sort_order'),
-    supabase.from('service_requirements').select('*').eq('active',true).order('sort_order')
+    supabase.from('service_requirements').select('*').eq('active',true).order('sort_order'),
+    supabase.from('app_settings').select('value').eq('key','payments_enforced').maybeSingle()
   ]);
   profile=p;services=srv||[];bundleItems=bundles||[];serviceRequirements=reqCatalog||[];
+  paymentsEnabled=paymentSetting?.value?.enabled===true;
 }
 function home(){
   return shell(`<section class="hero rolehome">
@@ -298,10 +300,10 @@ async function customerDetail(id){
       <span>${(i||[]).map(x=>esc(x.service_name_ar)).join('، ')}</span>
       <strong>${money(o.total_amount)}</strong>
     </div>
-    <div class="paymentbox">
+    ${(paymentsEnabled||o.refund_pending||['paid','refunded','partially_refunded'].includes(payment?.status))?`<div class="paymentbox">
       <div><small>الدفع</small><b>${paymentLabel}</b></div>
       <strong>${money(payment?.amount??o.total_amount)}</strong>
-    </div>
+    </div>`:''}
     ${o.status==='completed'?`<div class="completebox"><span class="completecheck">✓</span><div><b>اكتمل الطلب</b><small>مستنداتك جاهزة أدناه.</small></div></div>`:''}
     ${incompleteRequired.length?`<div class="completebox requirementgate"><span class="completecheck">!</span><div><b>أكمل المعلومات المطلوبة</b><small>لن يظهر الطلب للوكلاء قبل إكمال ${incompleteRequired.length} عنصر مطلوب.</small></div></div>`:''}
     ${(deliverables||[]).length?`<div class="deliverables"><small>المستندات المطلوبة</small><div>${deliverables.map(x=>`<span>${esc(x.service_name_ar)}</span>`).join('')}</div></div>`:''}
@@ -828,7 +830,7 @@ async function adminOrder(id){
     <h3>إدارة الطلب</h3>
     <form id="adminStatusForm">
       <select name="status">
-        ${Object.entries(labels).map(([k,v])=>`<option value="${k}" ${o.status===k?'selected':''}>${v}</option>`).join('')}
+        ${Object.entries(labels).filter(([k])=>k!=='cancelled').map(([k,v])=>`<option value="${k}" ${o.status===k?'selected':''}>${v}</option>`).join('')}
       </select>
       <input name="note" placeholder="ملاحظة للإدارة (اختياري)">
       <button class="secondary full">حفظ الحالة</button>
