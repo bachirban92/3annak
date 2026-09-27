@@ -193,10 +193,31 @@ async function agentPortal(){
   }
 
   if(a.verification_status!=='approved'){
+    const [{data:reqs},{data:docs}]=await Promise.all([
+      supabase.from('agent_verification_requirements').select('*').eq('active',true).order('sort_order'),
+      supabase.from('agent_documents').select('*').eq('agent_id',session.user.id)
+    ]);
+    const byReq=Object.fromEntries((docs||[]).map(d=>[d.requirement_id,d]));
+    const complete=(reqs||[]).filter(r=>r.required).every(r=>byReq[r.id]?.status==='approved');
+
     app.innerHTML=shell(`<section class="card narrow pending">
       <div class="title"><h2>طلب الوكيل</h2><button data-agent-logout>خروج</button></div>
-      <div class="statusbig">قيد المراجعة</div>
-      <p>سنفعّل حسابك بعد الاعتماد.</p>
+      <div class="statusbig">${complete?'جاهز للمراجعة':'أكمل التحقق'}</div>
+      <p>${complete?'تم اعتماد مستنداتك. بانتظار تفعيل الحساب.':'ارفع المستندات المطلوبة ليتمكن المسؤول من اعتماد حسابك.'}</p>
+
+      <div class="agentverifylist">
+        ${(reqs||[]).map(r=>{
+          const d=byReq[r.id];
+          const label=d?.status==='approved'?'معتمد':d?.status==='rejected'?'مرفوض':d?.status==='pending'?'قيد المراجعة':'مطلوب';
+          return `<div class="verifyitem">
+            <div><b>${esc(r.label_ar)}</b><small>${label}${d?.rejection_reason?' • '+esc(d.rejection_reason):''}</small></div>
+            ${d?.status==='approved'
+              ?'<span class="verifiedmark">✓</span>'
+              :`<input type="file" id="agent-doc-${r.id}" accept=".pdf,image/jpeg,image/png,image/webp">
+                 <button class="secondary compact" data-agent-doc-upload="${r.id}" data-old-path="${esc(d?.storage_path||'')}">${d?'إعادة الرفع':'رفع'}</button>`}
+          </div>`;
+        }).join('')}
+      </div>
     </section>`);
     return bind();
   }
@@ -360,12 +381,14 @@ async function adminAgent(id){
   clearLive();
   if(profile?.role!=='admin')return go('home');
 
-  const [{data:a,error},{data:p},{data:coverage},{data:orders},{data:ledger}]=await Promise.all([
+  const [{data:a,error},{data:p},{data:coverage},{data:orders},{data:ledger},{data:reqs},{data:docs}]=await Promise.all([
     supabase.from('agent_profiles').select('*').eq('user_id',id).single(),
     supabase.from('profiles').select('id,full_name,email,phone,is_active').eq('id',id).single(),
     supabase.from('agent_coverage').select('*').eq('agent_id',id).eq('active',true),
     supabase.from('orders').select('*').eq('assigned_agent_id',id).order('created_at',{ascending:false}).limit(30),
-    supabase.from('agent_ledger').select('*').eq('agent_id',id).order('created_at',{ascending:false}).limit(100)
+    supabase.from('agent_ledger').select('*').eq('agent_id',id).order('created_at',{ascending:false}).limit(100),
+    supabase.from('agent_verification_requirements').select('*').eq('active',true).order('sort_order'),
+    supabase.from('agent_documents').select('*').eq('agent_id',id)
   ]);
 
   if(error||!a)return toast(error?.message||'تعذر فتح الوكيل',true);
@@ -373,6 +396,8 @@ async function adminAgent(id){
   const pending=(ledger||[]).filter(x=>x.status==='pending'&&x.entry_type!=='payout').reduce((s,x)=>s+Number(x.amount||0),0);
   const available=(ledger||[]).filter(x=>x.status==='available'&&x.entry_type!=='payout').reduce((s,x)=>s+Number(x.amount||0),0);
   const paid=(ledger||[]).filter(x=>x.status==='paid'&&x.entry_type!=='payout').reduce((s,x)=>s+Number(x.amount||0),0);
+  const docsByReq=Object.fromEntries((docs||[]).map(d=>[d.requirement_id,d]));
+  const docsApproved=(reqs||[]).filter(r=>r.required).every(r=>docsByReq[r.id]?.status==='approved');
 
   app.innerHTML=shell(`<section>
     <div class="title"><h2>${esc(p?.full_name||'وكيل')}</h2><button data-go="admin">رجوع</button></div>
@@ -388,8 +413,24 @@ async function adminAgent(id){
       <div class="adminagentactions">
         ${a.verification_status==='approved'
           ?`<button class="secondary" data-suspend="${id}">تعليق الوكيل</button>`
-          :`<button class="primary" data-approve="${id}">اعتماد الوكيل</button>`}
+          :`<button class="primary" data-approve="${id}" ${docsApproved?'':'disabled'}>اعتماد الوكيل</button>`}
       </div>
+    </div>
+
+    <h3>التحقق</h3>
+    <div class="stack">
+      ${(reqs||[]).map(r=>{
+        const d=docsByReq[r.id];
+        if(!d)return `<div class="adminrow"><span><b>${esc(r.label_ar)}</b><small>لم يتم الرفع</small></span><i>ناقص</i></div>`;
+        return `<div class="adminrow verifyadmin">
+          <span><b>${esc(r.label_ar)}</b><small>${d.status==='approved'?'معتمد':d.status==='rejected'?'مرفوض':'قيد المراجعة'}${d.rejection_reason?' • '+esc(d.rejection_reason):''}</small></span>
+          <div class="verifyactions">
+            <button class="secondary compact" data-agent-doc-view="${d.storage_path}">فتح</button>
+            ${d.status!=='approved'?`<button class="primary compact" data-agent-doc-review="${d.id}" data-review-status="approved" data-agent-id="${id}">اعتماد</button>`:''}
+            ${d.status!=='rejected'?`<button class="secondary compact" data-agent-doc-review="${d.id}" data-review-status="rejected" data-agent-id="${id}">رفض</button>`:''}
+          </div>
+        </div>`;
+      }).join('')}
     </div>
 
     <h3>مناطق العمل</h3>
@@ -605,6 +646,63 @@ function bind(){
     if(coverage.error)return toast(coverage.error.message,true);
     await load();toast('تم إرسال طلب الوكيل');agentPortal();
   };
+
+  document.querySelectorAll('[data-agent-doc-upload]').forEach(x=>x.onclick=async()=>{
+    const input=document.querySelector('#agent-doc-'+x.dataset.agentDocUpload);
+    const file=input?.files?.[0];
+    if(!file)return toast('اختر الملف أولاً',true);
+    if(file.size>10*1024*1024)return toast('الحد الأقصى للملف 10MB',true);
+    if(!['application/pdf','image/jpeg','image/png','image/webp'].includes(file.type))return toast('نوع الملف غير مدعوم',true);
+
+    busy(x,true,'جارٍ الرفع...');
+    const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+    const path=session.user.id+'/'+x.dataset.agentDocUpload+'/'+Date.now()+'-'+safe;
+    const up=await supabase.storage.from('agent-files').upload(path,file);
+    if(up.error){busy(x,false);return toast(up.error.message,true)}
+
+    const saved=await supabase.rpc('submit_agent_document',{
+      p_requirement_id:x.dataset.agentDocUpload,
+      p_storage_path:path,
+      p_original_name:file.name,
+      p_mime_type:file.type,
+      p_file_size:file.size
+    });
+
+    if(saved.error){
+      await supabase.storage.from('agent-files').remove([path]);
+      busy(x,false);
+      return toast(saved.error.message,true);
+    }
+
+    const old=x.dataset.oldPath;
+    if(old && old!==path)await supabase.storage.from('agent-files').remove([old]);
+    busy(x,false);
+    toast('تم رفع المستند');
+    agentPortal();
+  });
+
+  document.querySelectorAll('[data-agent-doc-view]').forEach(x=>x.onclick=async()=>{
+    const {data,error}=await supabase.storage.from('agent-files').download(x.dataset.agentDocView);
+    if(error)return toast(error.message,true);
+    const u=URL.createObjectURL(data);
+    window.open(u,'_blank');
+    setTimeout(()=>URL.revokeObjectURL(u),60000);
+  });
+
+  document.querySelectorAll('[data-agent-doc-review]').forEach(x=>x.onclick=async()=>{
+    let reason='';
+    if(x.dataset.reviewStatus==='rejected'){
+      reason=prompt('سبب الرفض (اختياري)')||'';
+    }
+    busy(x,true);
+    const {error}=await supabase.rpc('admin_review_agent_document',{
+      p_document_id:x.dataset.agentDocReview,
+      p_status:x.dataset.reviewStatus,
+      p_reason:reason
+    });
+    busy(x,false);
+    error?toast(error.message,true):adminAgent(x.dataset.agentId);
+  });
 
   const av=document.querySelector('#agentAvailable');
   if(av)av.onchange=async()=>{
