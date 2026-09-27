@@ -271,10 +271,67 @@ async function admin(){
     <h3>الأسعار</h3>
     <div class="stack">${(s||[]).map(x=>`<form class="price" data-service="${x.id}"><b>${esc(x.name_ar)}</b><input name="cp" type="number" value="${x.customer_price}"><input name="ap" type="number" value="${x.agent_payout}"><label class="check"><input name="active" type="checkbox" ${x.active?'checked':''}> فعّال</label><button class="secondary">حفظ</button></form>`).join('')}</div>
     <h3>آخر الطلبات</h3>
-    <div class="stack">${(o||[]).map(x=>`<div class="adminrow"><b>${x.public_code}</b><i>${labels[x.status]}</i></div>`).join('')}</div>
+    <div class="stack">${(o||[]).map(x=>`<button class="row" data-admin-order="${x.id}"><span><b>${x.public_code}</b><small>${esc(x.cadastral_area)} • ${esc(x.property_number)}</small></span><i>${labels[x.status]}</i></button>`).join('')}</div>
   </section>`);
   bind();
 }
+async function adminOrder(id){
+  clearLive();
+  if(profile?.role!=='admin')return go('home');
+  const [{data:pack,error},{data:agents}]=await Promise.all([
+    supabase.rpc('admin_get_order',{p_order_id:id}),
+    supabase.from('agent_profiles').select('user_id,verification_status').eq('verification_status','approved')
+  ]);
+  if(error||!pack)return toast(error?.message||'تعذر فتح الطلب',true);
+
+  const agentIds=(agents||[]).map(x=>x.user_id),agentNames={};
+  if(agentIds.length){
+    const {data:p}=await supabase.from('profiles').select('id,full_name,email,phone').in('id',agentIds);
+    (p||[]).forEach(x=>agentNames[x.id]=x);
+  }
+  const o=pack.order,items=pack.items||[],events=pack.events||[],docs=pack.documents||[],reqs=pack.requirements||[];
+  app.innerHTML=shell(`<section class="card">
+    <div class="title"><h2>${esc(o.public_code)}</h2><button data-go="admin">رجوع</button></div>
+    <div class="jobinfo">
+      <div><small>العميل</small><b>${esc(o.customer_name||'—')}</b></div>
+      <div><small>الهاتف</small><b>${esc(o.customer_phone||'—')}</b></div>
+      <div><small>العقار</small><b>${esc(o.cadastral_area)} • ${esc(o.property_number)}</b></div>
+      <div><small>الخدمة</small><b>${items.map(x=>esc(x.service_name_ar)).join('، ')}</b></div>
+      <div><small>الإجمالي</small><b>${money(o.total_amount)}</b></div>
+      <div><small>الحالة</small><b>${labels[o.status]||o.status}</b></div>
+    </div>
+
+    <h3>إدارة الطلب</h3>
+    <form id="adminStatusForm">
+      <select name="status">
+        ${Object.entries(labels).map(([k,v])=>`<option value="${k}" ${o.status===k?'selected':''}>${v}</option>`).join('')}
+      </select>
+      <input name="note" placeholder="ملاحظة للإدارة (اختياري)">
+      <button class="secondary full">حفظ الحالة</button>
+    </form>
+
+    <form id="adminAssignForm">
+      <select name="agent" required>
+        <option value="">تعيين / إعادة تعيين وكيل</option>
+        ${(agents||[]).map(a=>`<option value="${a.user_id}" ${o.assigned_agent_id===a.user_id?'selected':''}>${esc(agentNames[a.user_id]?.full_name||agentNames[a.user_id]?.email||a.user_id)}</option>`).join('')}
+      </select>
+      <button class="secondary full">تعيين الوكيل</button>
+    </form>
+
+    <button class="danger full" data-admin-cancel="${o.id}">إلغاء الطلب</button>
+
+    <h3>المتطلبات</h3>
+    <div class="stack">${reqs.length?reqs.map(r=>`<div class="adminrow"><span><b>${esc(r.label_ar)}</b><small>${r.required?'مطلوب':'اختياري'}</small></span><i>${r.completed_at?'مكتمل':'ناقص'}</i></div>`).join(''):'<div class="empty">لا توجد متطلبات.</div>'}</div>
+
+    <h3>الملفات</h3>
+    <div class="stack">${docs.length?docs.map(d=>`<div class="adminrow"><span><b>${esc(d.original_name||'ملف')}</b><small>${esc(d.kind)}</small></span></div>`).join(''):'<div class="empty">لا توجد ملفات.</div>'}</div>
+
+    <h3>التتبّع</h3>
+    <div class="timeline">${events.map(e=>`<div><b>${esc(e.label_ar)}</b><small>${new Date(e.created_at).toLocaleString('ar-LB')}</small></div>`).join('')}</div>
+  </section>`);
+  bind();
+}
+
 function render(){
   if(!session){
     app.innerHTML=shell('<section class="card narrow"><h2>جارٍ تجهيز الجلسة...</h2></section>');
@@ -285,6 +342,7 @@ function render(){
   else if(r==='orders')return orders();
   else if(r==='agent')return agentPortal();
   else if(r==='admin')return admin();
+  else if(r.startsWith('admin-order/'))return adminOrder(r.split('/')[1]);
   else app.innerHTML=home();
   bind();
 }
@@ -332,6 +390,7 @@ function bind(){
   };
 
   document.querySelectorAll('[data-order]').forEach(x=>x.onclick=()=>customerDetail(x.dataset.order));
+  document.querySelectorAll('[data-admin-order]').forEach(x=>x.onclick=()=>go('admin-order/'+x.dataset.adminOrder));
   document.querySelectorAll('[data-agent-order]').forEach(x=>x.onclick=()=>agentJob(x.dataset.agentOrder));
 
   document.querySelectorAll('[data-accept]').forEach(x=>x.onclick=async()=>{
@@ -376,6 +435,28 @@ function bind(){
 
   document.querySelectorAll('[data-approve]').forEach(x=>x.onclick=()=>agentStatus(x.dataset.approve,'approved'));
   document.querySelectorAll('[data-suspend]').forEach(x=>x.onclick=()=>agentStatus(x.dataset.suspend,'suspended'));
+  const adminStatus=document.querySelector('#adminStatusForm');
+  if(adminStatus)adminStatus.onsubmit=async e=>{
+    e.preventDefault();const d=new FormData(adminStatus),b=adminStatus.querySelector('button');busy(b,true);
+    const id=location.hash.split('/')[1];
+    const {error}=await supabase.rpc('admin_update_order',{p_order_id:id,p_status:d.get('status'),p_official_fees:null,p_total_amount:null,p_note:d.get('note')||''});
+    busy(b,false);error?toast(error.message,true):(toast('تم تحديث الطلب'),adminOrder(id));
+  };
+
+  const adminAssign=document.querySelector('#adminAssignForm');
+  if(adminAssign)adminAssign.onsubmit=async e=>{
+    e.preventDefault();const d=new FormData(adminAssign),b=adminAssign.querySelector('button');busy(b,true);
+    const id=location.hash.split('/')[1];
+    const {error}=await supabase.rpc('admin_reassign_order',{p_order_id:id,p_agent_id:d.get('agent'),p_reason:''});
+    busy(b,false);error?toast(error.message,true):(toast('تم تعيين الوكيل'),adminOrder(id));
+  };
+
+  document.querySelectorAll('[data-admin-cancel]').forEach(x=>x.onclick=async()=>{
+    if(!confirm('إلغاء هذا الطلب؟'))return;
+    const {error}=await supabase.rpc('admin_cancel_order',{p_order_id:x.dataset.adminCancel,p_reason:''});
+    error?toast(error.message,true):(toast('تم إلغاء الطلب'),admin());
+  });
+
   document.querySelectorAll('[data-service]').forEach(f=>f.onsubmit=async e=>{
     e.preventDefault();const d=new FormData(f),b=f.querySelector('button');busy(b,true);
     const {error}=await supabase.rpc('admin_update_service',{p_service_id:f.dataset.service,p_customer_price:+d.get('cp'),p_agent_payout:+d.get('ap'),p_active:d.get('active')==='on'});
