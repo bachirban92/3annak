@@ -786,7 +786,21 @@ function bind(){
       email:String(f.get('email')||'').trim(),
       password:String(f.get('password')||'')
     });
-    if(error){busy(b,false);return toast('البريد أو كلمة المرور غير صحيحة.',true)}
+    if(error){
+      busy(b,false);
+      if(error.code==='email_not_confirmed'||/email not confirmed/i.test(error.message||'')){
+        const email=String(f.get('email')||'').trim();
+        app.innerHTML=shell(`<section class="card narrow pending">
+          <h2>فعّل بريدك أولاً</h2>
+          <p>أرسلنا رسالة تأكيد إلى <b>${esc(email)}</b>. افتحها واضغط رابط التفعيل، ثم ارجع وسجّل الدخول.</p>
+          <button class="secondary full" data-resend-customer-confirm="${esc(email)}">إعادة إرسال رسالة التفعيل</button>
+          <button class="primary full" data-go="customer-login">رجوع للدخول</button>
+        </section>`);
+        bind();
+        return;
+      }
+      return toast('البريد أو كلمة المرور غير صحيحة.',true)
+    }
     session=data.session;
     await load();
     busy(b,false);
@@ -795,6 +809,16 @@ function bind(){
     toast('تم تسجيل الدخول');
     go('orders');
   };
+
+  document.querySelectorAll('[data-resend-customer-confirm]').forEach(x=>x.onclick=async()=>{
+    busy(x,true,'جارٍ الإرسال...');
+    const {error}=await supabase.auth.resend({
+      type:'signup',
+      email:x.dataset.resendCustomerConfirm
+    });
+    busy(x,false);
+    error?toast(error.message,true):toast('تم إرسال رسالة التفعيل من جديد');
+  });
 
   const customerRegisterForm=document.querySelector('#customerRegister');
   if(customerRegisterForm)customerRegisterForm.onsubmit=async e=>{
