@@ -917,12 +917,22 @@ async function agentJob(id){
     <div class="jobinfo">
       <div><small>الخدمة</small><b>${esc(o.service_names)}</b></div>
       <div><small>العقار</small><b>${esc(o.cadastral_area)} • ${esc(o.property_number)}</b></div>
-      <div><small>بدلك</small><b>${money(o.agent_payout)}</b></div>
+      <div><small>بدلك</small><b>${money(o.agent_payout)}</b>${deliveryOrder?.delivery_agent_payout>0?`<small>يشمل ${money(deliveryOrder.delivery_agent_payout)} توصيل</small>`:''}</div>
+      <div><small>الاستلام</small><b>${deliveryOrder?.delivery_mode==='hard_copy'?'نسخة ورقية + إلكترونية':'نسخة إلكترونية'}</b></div>
       <div><small>العميل</small><b>${esc(o.customer_name||'—')}</b></div>
       <div><small>الهاتف</small><a href="tel:${esc(o.customer_phone)}">${esc(o.customer_phone||'—')}</a></div>
       ${o.expected_ready_at?`<div><small>الوقت المتوقع</small><b>${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}</b></div>`:''}
       ${o.notes?`<div class="wide"><small>ملاحظة</small><b>${esc(o.notes)}</b></div>`:''}
     </div>
+
+    ${deliveryOrder?.delivery_mode==='hard_copy'?`<section class="delivery-task ${deliveryOrder.hard_copy_delivered_at?'done':''}">
+      <div>
+        <small>توصيل النسخة الورقية</small>
+        <b>${deliveryOrder.hard_copy_delivered_at?'تم التوصيل':'مطلوب التوصيل'}</b>
+        <span>${esc([deliveryOrder.delivery_address_line1,deliveryOrder.delivery_address_line2,deliveryOrder.delivery_city,deliveryOrder.delivery_region,deliveryOrder.delivery_country].filter(Boolean).join(' • '))}</span>
+      </div>
+      ${deliveryOrder.hard_copy_delivered_at?'<span class="verifiedmark">✓</span>':`<button class="primary compact" data-confirm-hard-copy="${o.id}">تأكيد التوصيل</button>`}
+    </section>`:''}
 
     ${(requirements||[]).length?`<h3>معلومات العميل</h3>
       <div class="requirements agentrequirements">
@@ -962,7 +972,7 @@ async function agentJob(id){
 
     ${next?`
       ${next[0]==='completed'&&missingDeliverables.length?`<div class="completebox requirementgate"><span class="completecheck">!</span><div><b>أكمل المستندات النهائية</b><small>باقي ${missingDeliverables.length} مستند قبل إكمال الطلب.</small></div></div>`:''}
-      <button class="primary full next-action" data-status="${next[0]}" data-id="${o.id}" ${next[0]==='completed'&&missingDeliverables.length?'disabled':''}>${next[1]}</button>
+      <button class="primary full next-action" data-status="${next[0]}" data-id="${o.id}" ${next[0]==='completed'&&(missingDeliverables.length||hardCopyPending)?'disabled':''}>${next[1]}</button>
     `:'<div class="donebox">تم إكمال الطلب</div>'}
   </section>`);
   bind();
@@ -2107,6 +2117,14 @@ function bind(){
     const {error}=await supabase.rpc('accept_order',{p_order_id:x.dataset.accept});
     if(error){busy(x,false);return toast(error.message==='order_unavailable'?'تم أخذ الطلب من وكيل آخر':error.message,true)}
     toast('أصبح الطلب لك');agentJob(x.dataset.accept);
+  });
+
+  document.querySelectorAll('[data-confirm-hard-copy]').forEach(x=>x.onclick=async()=>{
+    if(!confirm('تأكيد أنك سلّمت النسخة الورقية للعميل؟'))return;
+    busy(x,true,'جارٍ التأكيد...');
+    const {error}=await supabase.rpc('confirm_hard_copy_delivery',{p_order_id:x.dataset.confirmHardCopy,p_note:null});
+    busy(x,false);
+    error?toast(error.message,true):(toast('تم تأكيد التوصيل'),agentJob(x.dataset.confirmHardCopy));
   });
 
   document.querySelectorAll('[data-status]').forEach(x=>x.onclick=async()=>{
