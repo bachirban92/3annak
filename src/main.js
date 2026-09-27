@@ -43,7 +43,7 @@ function shell(body){
   const anonymous=isAnonymousUser();
   if(profile?.role==='agent') right='';
   else if(profile?.role==='admin') right=`<button class="toplink withicon" data-go="admin">${icon('settings')}<span>الإدارة</span></button>`;
-  else if(!anonymous) right=`<button class="toplink withicon" data-go="orders">${icon('orders')}<span>طلباتي</span></button>`;
+  else if(!anonymous&&profile?.role==='customer') right=`<button class="toplink withicon" data-go="customer">${icon('orders')}<span>حسابي</span></button>`;
   return `<header><button class="brand" data-go="home">عنّك</button>${right}</header><main>${body}</main>`;
 }
 async function load(){
@@ -180,6 +180,7 @@ async function customerPortal(){
 
 function newOrder(){
   if(isAnonymousUser())return customerAuthChoice();
+  if(profile?.role!=='customer')return profile?.role==='agent'?agentPortal():go('admin');
   return shell(renderNewOrder({services,bundleItems,profile,gov,esc,money}));
 }
 async function orders(){
@@ -187,7 +188,7 @@ async function orders(){
   const {data,error}=await supabase.from('orders').select('*').eq('customer_id',session.user.id).order('created_at',{ascending:false});
   if(error)return toast(error.message,true);
   app.innerHTML=shell(`<section>
-    <div class="title"><h2>طلباتي</h2><button data-go="home">رجوع</button></div>
+    <div class="title"><h2>طلباتي</h2><button data-go="customer">رجوع</button></div>
     <div class="stack">${(data||[]).map(o=>`<button class="row" data-order="${o.id}"><span><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span><i>${labels[o.status]||o.status}</i></button>`).join('')||'<div class="empty">لا يوجد طلبات.</div>'}</div>
     <button class="primary full" data-go="new">طلب جديد</button>
   </section>`);
@@ -312,11 +313,20 @@ function agentRegister(){
 
 async function agentPortal(){
   clearLive();
-  const {data:a}=await supabase.from('agent_profiles').select('*').eq('user_id',session.user.id).maybeSingle();
 
-  if(!a && isAnonymousUser()){
-    return agentAuthChoice();
+  if(isAnonymousUser())return agentAuthChoice();
+  if(profile?.role==='customer'){
+    app.innerHTML=shell(`<section class="card narrow">
+      <h2>أنت داخل كعميل</h2>
+      <p>اخرج من حساب العميل أولاً إذا بدك تدخل أو تسجل كوكيل.</p>
+      <button class="primary full" data-go="customer">لوحة العميل</button>
+      <button class="secondary full" data-customer-logout>خروج</button>
+    </section>`);
+    return bind();
   }
+  if(profile?.role==='admin')return go('admin');
+
+  const {data:a}=await supabase.from('agent_profiles').select('*').eq('user_id',session.user.id).maybeSingle();
 
   if(!a){
     app.innerHTML=shell(`<section class="card narrow">
@@ -748,30 +758,80 @@ function render(){
     app.innerHTML=shell('<section class="card narrow"><h2>جارٍ تجهيز الجلسة...</h2></section>');
     return bind();
   }
+
   const r=location.hash.slice(1)||'home';
-  if(r==='customer')return customerPortal();
-  else if(r==='customer-login'){app.innerHTML='';return customerLogin();}
-  else if(r==='customer-register'){app.innerHTML='';return customerRegister();}
-  else if(r==='new'){
-    const out=newOrder();
-    if(typeof out==='string')app.innerHTML=out;
-    else return out;
+  const anonymous=isAnonymousUser();
+
+  // Home is the public role chooser only when signed out.
+  // Signed-in users always land on their own dashboard.
+  if(r==='home'){
+    if(anonymous){app.innerHTML=home();return bind()}
+    if(profile?.role==='customer')return customerPortal();
+    if(profile?.role==='agent')return agentPortal();
+    if(profile?.role==='admin')return admin();
+    app.innerHTML=home();return bind();
   }
-  else if(r==='orders'){
-    if(isAnonymousUser())return customerAuthChoice();
+
+  if(r==='customer'){
+    if(anonymous)return customerAuthChoice();
+    if(profile?.role==='customer')return customerPortal();
+    if(profile?.role==='agent')return agentPortal();
+    if(profile?.role==='admin')return admin();
+    return customerAuthChoice();
+  }
+
+  if(r==='customer-login'){
+    if(!anonymous)return go('home');
+    app.innerHTML='';
+    return customerLogin();
+  }
+
+  if(r==='customer-register'){
+    if(!anonymous)return go('home');
+    app.innerHTML='';
+    return customerRegister();
+  }
+
+  if(r==='new'){
+    if(anonymous)return customerAuthChoice();
+    if(profile?.role!=='customer')return go('home');
+    const out=newOrder();
+    if(typeof out==='string'){app.innerHTML=out;bind()}
+    return;
+  }
+
+  if(r==='orders'){
+    if(anonymous)return customerAuthChoice();
+    if(profile?.role!=='customer')return go('home');
     return orders();
   }
-  else if(r==='agent')return agentPortal();
-  else if(r==='agent-login'){app.innerHTML='';return agentLogin();}
-  else if(r==='agent-register'){app.innerHTML='';return agentRegister();}
-  else if(r==='staff')return staffAccess();
-  else if(r==='admin')return admin();
-  else if(r.startsWith('admin-dispute/'))return adminDispute(r.split('/')[1]);
-  else if(r.startsWith('admin-agent/'))return adminAgent(r.split('/')[1]);
-  else if(r.startsWith('admin-order/'))return adminOrder(r.split('/')[1]);
-  else if(profile?.role==='agent')return agentPortal();
-  else app.innerHTML=home();
-  bind();
+
+  if(r==='agent'){
+    if(anonymous)return agentAuthChoice();
+    if(profile?.role==='customer')return agentPortal();
+    if(profile?.role==='admin')return admin();
+    return agentPortal();
+  }
+
+  if(r==='agent-login'){
+    if(!anonymous)return go('home');
+    app.innerHTML='';
+    return agentLogin();
+  }
+
+  if(r==='agent-register'){
+    if(!anonymous)return go('home');
+    app.innerHTML='';
+    return agentRegister();
+  }
+
+  if(r==='staff')return staffAccess();
+  if(r==='admin')return profile?.role==='admin'?admin():go('home');
+  if(r.startsWith('admin-dispute/'))return profile?.role==='admin'?adminDispute(r.split('/')[1]):go('home');
+  if(r.startsWith('admin-agent/'))return profile?.role==='admin'?adminAgent(r.split('/')[1]):go('home');
+  if(r.startsWith('admin-order/'))return profile?.role==='admin'?adminOrder(r.split('/')[1]):go('home');
+
+  return go('home');
 }
 function bind(){
   document.querySelectorAll('[data-go]').forEach(x=>x.onclick=()=>go(x.dataset.go));
@@ -807,7 +867,7 @@ function bind(){
     if(profile?.role==='agent'){toast('هذا حساب وكيل');return go('agent')}
     if(profile?.role==='admin')return go('admin');
     toast('تم تسجيل الدخول');
-    go('orders');
+    go('customer');
   };
 
   document.querySelectorAll('[data-resend-customer-confirm]').forEach(x=>x.onclick=async()=>{
@@ -855,7 +915,7 @@ function bind(){
     if(contact.error)return toast(contact.error.message,true);
     await load();
     toast('تم إنشاء الحساب');
-    go('new');
+    go('customer');
   };
 
   document.querySelectorAll('[data-customer-logout]').forEach(x=>x.onclick=async()=>{
