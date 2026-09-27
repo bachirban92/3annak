@@ -50,10 +50,19 @@ async function load(){
   profile=p;services=srv||[];
 }
 function home(){
-  return shell(`<section class="hero">
-    <small>معاملات عقارية في لبنان</small>
-    <h1>اطلب أوراق عقارك.<br>ونحن نتابعها عنك.</h1>
-    <button class="primary withicon" data-go="new">${icon('plus')}<span>طلب جديد</span></button>
+  return shell(`<section class="hero rolehome">
+    <small>عنّك</small>
+    <h1>كيف بدك تستخدم المنصة؟</h1>
+    <div class="rolechoices">
+      <button class="rolecard" data-go="new">
+        <span class="roleicon">${icon('orders')}</span>
+        <span><b>أنا عميل</b><small>بدي أطلب مستندات لعقار</small></span>
+      </button>
+      <button class="rolecard" data-go="agent">
+        <span class="roleicon">${icon('briefcase')}</span>
+        <span><b>أنا وكيل</b><small>بدي استلم وأنفّذ طلبات</small></span>
+      </button>
+    </div>
   </section>`);
 }
 function newOrder(){
