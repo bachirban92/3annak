@@ -11,15 +11,15 @@
 - [x] Private document upload/download
 - [x] Completed jobs history
 - [ ] Service-specific required inputs/documents
-- [ ] Agent status note + expected ready date
+- [x] Automatic expected ready date from preset service timing
 - [ ] Official fee / receipt flow visible to customer/admin
 - [ ] Customer contact/recovery flow if browser session is lost
-- [ ] Admin order detail with override/reassign/cancel
+- [x] Admin order detail with override/reassign/cancel
 
 ## P1 — Agent operations
-- [ ] Agent notification inbox
+- [x] Agent notification inbox (in-app)
 - [ ] Browser/push notification for new jobs
-- [ ] Agent earnings: pending / available / paid detail
+- [x] Agent earnings: pending / available / paid detail
 - [ ] Expense reimbursement UI
 - [ ] Weekly payout batch + payout history
 - [ ] Agent performance stats
@@ -38,7 +38,7 @@
 ## P1 — Admin
 - [ ] Dashboard counts and revenue
 - [ ] Full order search/filter
-- [ ] Order detail + timeline + files
+- [x] Order detail + timeline + files
 - [ ] Agent approval documents
 - [ ] Service price / payout / requirements editor
 - [ ] Expenses approval
