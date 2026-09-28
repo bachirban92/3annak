@@ -433,3 +433,11 @@ main{
   .job>strong{justify-self:start}
   .job .primary{grid-column:auto;width:100%}
 }
+
+.payout-account-admin{display:grid;gap:12px}
+.payout-account-admin .jobinfo{margin:0}
+.iban-value{overflow-wrap:anywhere;direction:ltr;text-align:left}
+.payout-list{margin-top:10px}
+@media(max-width:620px){
+  .payout-account-admin .adminagentactions{display:grid;grid-template-columns:1fr}
+}
