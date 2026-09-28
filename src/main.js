@@ -2031,7 +2031,7 @@ function bind(){
         }
 
         const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
-        const path=orderId+'/'+crypto.randomUUID()+'-'+safe;
+        const path=orderId+'/customer/'+session.user.id+'/'+crypto.randomUUID()+'-'+safe;
         const up=await supabase.storage.from('order-files').upload(path,file);
         if(up.error){
           busy(b,false);
@@ -2063,6 +2063,8 @@ function bind(){
           p_document_id:ins.data.id
         });
         if(done.error){
+          await supabase.from('documents').delete().eq('id',ins.data.id);
+          await supabase.storage.from('order-files').remove([path]);
           busy(b,false);
           toast('تم إنشاء الطلب، لكن تعذر إكمال '+req.label_ar,true);
           return customerDetail(orderId);
@@ -2222,7 +2224,7 @@ function bind(){
 
     busy(x,true,'جارٍ الرفع...');
     const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
-    const path=x.dataset.orderId+'/'+crypto.randomUUID()+'-'+safe;
+    const path=x.dataset.orderId+'/agent/'+session.user.id+'/'+crypto.randomUUID()+'-'+safe;
     const up=await supabase.storage.from('order-files').upload(path,file);
     if(up.error){busy(x,false);return toast(up.error.message,true)}
 
