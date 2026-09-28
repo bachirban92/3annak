@@ -29,16 +29,13 @@ export function bindRequirementActions({toast,busy,reload}){
     const path=x.dataset.orderId+'/customer/'+user.id+'/'+crypto.randomUUID()+'-'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
     const up=await supabase.storage.from('order-files').upload(path,file);
     if(up.error){busy(x,false);return toast(up.error.message,true)}
-    const ins=await supabase.from('documents').insert({
-      order_id:x.dataset.orderId,
-      kind:'customer_attachment',
-      storage_path:path,
-      original_name:file.name,
-      mime_type:file.type,
-      file_size:file.size,
-      visible_to_customer:true,
-      uploaded_by:user.id
-    }).select('id').single();
+    const ins=await supabase.rpc('register_customer_attachment',{
+      p_order_id:x.dataset.orderId,
+      p_storage_path:path,
+      p_original_name:file.name,
+      p_mime_type:file.type,
+      p_file_size:file.size
+    });
     if(ins.error){
       await supabase.storage.from('order-files').remove([path]);
       busy(x,false);
@@ -47,10 +44,10 @@ export function bindRequirementActions({toast,busy,reload}){
     const done=await supabase.rpc('complete_order_requirement',{
       p_order_requirement_id:x.dataset.reqUpload,
       p_value_text:null,
-      p_document_id:ins.data.id
+      p_document_id:ins.data?.id
     });
     if(done.error){
-      await supabase.from('documents').delete().eq('id',ins.data.id);
+      if(ins.data?.id)await supabase.from('documents').delete().eq('id',ins.data.id);
       await supabase.storage.from('order-files').remove([path]);
       busy(x,false);
       return toast(done.error.message,true);
