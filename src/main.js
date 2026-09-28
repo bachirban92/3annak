@@ -48,23 +48,38 @@ function shell(body){
 }
 async function load(){
   const {data:{session:s}}=await supabase.auth.getSession();
-  session=s;
-  if(!session){
-    const {data,error}=await supabase.auth.signInAnonymously();
-    if(error){console.error(error);return}
-    session=data.session;
-  }
+  session=s||null;
+
+  const profileQuery=session
+    ?supabase.from('profiles').select('*').eq('id',session.user.id).maybeSingle()
+    :Promise.resolve({data:null});
+  const bundlesQuery=session
+    ?supabase.from('service_bundle_items').select('*').order('sort_order')
+    :Promise.resolve({data:[]});
+  const propertiesQuery=session
+    ?supabase.from('customer_properties').select('*').order('is_default',{ascending:false}).order('created_at',{ascending:false})
+    :Promise.resolve({data:[]});
+  const addressesQuery=session
+    ?supabase.from('customer_addresses').select('*').order('is_default',{ascending:false}).order('created_at',{ascending:false})
+    :Promise.resolve({data:[]});
+
   const [{data:p},{data:srv},{data:bundles},{data:reqCatalog},{data:savedProps},{data:savedAddresses},{data:deliverySetting},{data:paymentSetting}]=await Promise.all([
-    supabase.from('profiles').select('*').eq('id',session.user.id).maybeSingle(),
+    profileQuery,
     supabase.from('services').select('*').eq('active',true).order('sort_order'),
-    supabase.from('service_bundle_items').select('*').order('sort_order'),
+    bundlesQuery,
     supabase.from('service_requirements').select('*').eq('active',true).order('sort_order'),
-    supabase.from('customer_properties').select('*').order('is_default',{ascending:false}).order('created_at',{ascending:false}),
-    supabase.from('customer_addresses').select('*').order('is_default',{ascending:false}).order('created_at',{ascending:false}),
+    propertiesQuery,
+    addressesQuery,
     supabase.from('app_settings').select('value').eq('key','hard_copy_delivery').maybeSingle(),
     supabase.from('app_settings').select('value').eq('key','payments_enforced').maybeSingle()
   ]);
-  profile=p;services=srv||[];bundleItems=bundles||[];serviceRequirements=reqCatalog||[];customerProperties=savedProps||[];customerAddresses=savedAddresses||[];
+
+  profile=p||null;
+  services=srv||[];
+  bundleItems=bundles||[];
+  serviceRequirements=reqCatalog||[];
+  customerProperties=savedProps||[];
+  customerAddresses=savedAddresses||[];
   deliveryConfig=deliverySetting?.value||{enabled:false,customer_fee:0,agent_payout:0};
   paymentsEnabled=paymentSetting?.value?.enabled===true;
 }
@@ -1415,11 +1430,6 @@ async function adminOrder(id){
 }
 
 function render(){
-  if(!session){
-    app.innerHTML=shell('<section class="card narrow"><h2>جارٍ تجهيز الجلسة...</h2></section>');
-    return bind();
-  }
-
   const r=location.hash.slice(1)||'home';
   const anonymous=isAnonymousUser();
 
