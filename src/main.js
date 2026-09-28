@@ -592,7 +592,7 @@ async function customerDetail(id){
       ${(deliverables||[]).length?`<div class="deliverables compact"><small>المستندات المطلوبة</small><div>${deliverables.map(x=>`<span>${esc(x.service_name_ar)}</span>`).join('')}</div></div>`:''}
     </section>
 
-    ${(paymentsEnabled||o.refund_pending||['paid','refunded','partially_refunded'].includes(payment?.status))?`<div class="paymentbox">
+    ${payment?`<div class="paymentbox">
       <div><small>الدفع</small><b>${paymentLabel}</b>${payment?.status==='paid'?'<small>طريقة الدفع: نقداً</small>':''}</div>
       <strong>${money(payment?.amount??o.total_amount)}</strong>
     </div>`:''}
