@@ -1288,10 +1288,12 @@ async function adminAgent(id){
 async function adminOrder(id){
   clearLive();
   if(profile?.role!=='admin')return go('home');
-  const [{data:pack,error},{data:agents},{data:payments}]=await Promise.all([
+  const [{data:pack,error},{data:agents},{data:payments},{data:workflowSteps},{data:deliverables}]=await Promise.all([
     supabase.rpc('admin_get_order',{p_order_id:id}),
     supabase.from('agent_profiles').select('user_id,verification_status').eq('verification_status','approved'),
-    supabase.from('payments').select('*').eq('order_id',id).order('created_at',{ascending:false}).limit(1)
+    supabase.from('payments').select('*').eq('order_id',id).order('created_at',{ascending:false}).limit(1),
+    supabase.from('order_workflow_steps').select('*').eq('order_id',id).order('sort_order'),
+    supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order')
   ]);
   if(error||!pack)return toast(error?.message||'تعذر فتح الطلب',true);
 
@@ -1302,6 +1304,12 @@ async function adminOrder(id){
   }
   const o=pack.order,items=pack.items||[],events=pack.events||[],docs=pack.documents||[],reqs=pack.requirements||[];
   const payment=payments?.[0];
+  const docsById=Object.fromEntries(docs.map(d=>[d.id,d]));
+  const finalByDeliverable=Object.fromEntries(docs.filter(d=>d.kind==='final_document'&&d.deliverable_id).map(d=>[d.deliverable_id,d]));
+  const incompleteRequired=reqs.filter(r=>r.required&&!r.completed_at);
+  const canAssign=!['completed','cancelled'].includes(o.status)
+    && o.customer_submission_ready!==false
+    && incompleteRequired.length===0;
 
   let eligibleAgents=agents||[];
   if(eligibleAgents.length){
@@ -1350,19 +1358,49 @@ async function adminOrder(id){
       <button class="secondary full">إضافة الملاحظة</button>
     </form>
 
-    ${!['completed','cancelled'].includes(o.status)?`<form id="adminAssignForm">
-      <select name="agent" required>
-        <option value="">${o.assigned_agent_id?'اختر وكيلاً لإعادة التعيين':'اختر وكيلاً للتعيين'}</option>
-        ${eligibleAgents.filter(a=>a.user_id!==o.assigned_agent_id).map(a=>`<option value="${a.user_id}">${esc(agentNames[a.user_id]?.full_name||agentNames[a.user_id]?.email||a.user_id)}</option>`).join('')}
-      </select>
-      <input name="reason" ${o.assigned_agent_id?'required':''} placeholder="${o.assigned_agent_id?'سبب إعادة التعيين':'سبب التعيين (اختياري)'}">
-      <button class="secondary full" ${eligibleAgents.filter(a=>a.user_id!==o.assigned_agent_id).length?'':'disabled'}>${o.assigned_agent_id?'إعادة تعيين الوكيل':'تعيين الوكيل'}</button>
-    </form>`:''}
+    ${!['completed','cancelled'].includes(o.status)?`
+      ${!canAssign?`<div class="info-box"><b>بانتظار العميل</b><small>${incompleteRequired.length?'هناك متطلبات مطلوبة غير مكتملة.':'لم يتم إرسال الطلب للوكلاء بعد.'}</small></div>`:''}
+      <form id="adminAssignForm">
+        <select name="agent" required ${canAssign?'':'disabled'}>
+          <option value="">${o.assigned_agent_id?'اختر وكيلاً لإعادة التعيين':'اختر وكيلاً للتعيين'}</option>
+          ${eligibleAgents.filter(a=>a.user_id!==o.assigned_agent_id).map(a=>`<option value="${a.user_id}">${esc(agentNames[a.user_id]?.full_name||agentNames[a.user_id]?.email||a.user_id)}</option>`).join('')}
+        </select>
+        <input name="reason" ${o.assigned_agent_id?'required':''} ${canAssign?'':'disabled'} placeholder="${o.assigned_agent_id?'سبب إعادة التعيين':'سبب التعيين (اختياري)'}">
+        <button class="secondary full" ${canAssign&&eligibleAgents.filter(a=>a.user_id!==o.assigned_agent_id).length?'':'disabled'}>${o.assigned_agent_id?'إعادة تعيين الوكيل':'تعيين الوكيل'}</button>
+      </form>`:''}
 
     ${!['completed','cancelled'].includes(o.status)?`<button class="danger full" data-admin-cancel="${o.id}">إلغاء الطلب</button>`:''}
 
     <h3>المتطلبات</h3>
-    <div class="stack">${reqs.length?reqs.map(r=>`<div class="adminrow"><span><b>${esc(r.label_ar)}</b><small>${r.required?'مطلوب':'اختياري'}</small></span><i>${r.completed_at?'مكتمل':'ناقص'}</i></div>`).join(''):'<div class="empty">لا توجد متطلبات.</div>'}</div>
+    <div class="stack">${reqs.length?reqs.map(r=>{
+      const d=r.document_id?docsById[r.document_id]:null;
+      return `<div class="adminrow">
+        <span><b>${esc(r.label_ar)}</b><small>${r.value_text?esc(r.value_text):(d?esc(d.original_name||'مرفق'):(r.required?'مطلوب وغير مكتمل':'اختياري'))}</small></span>
+        <div class="row-actions">
+          ${d?`<button class="secondary compact" data-file-view="${esc(d.storage_path)}" data-file-name="${esc(d.original_name||'مستند')}" data-file-mime="${esc(d.mime_type||'')}">عرض</button>`:''}
+          <i>${r.completed_at?'مكتمل':'ناقص'}</i>
+        </div>
+      </div>`;
+    }).join(''):'<div class="empty">لا توجد متطلبات.</div>'}</div>
+
+    <h3>التنفيذ</h3>
+    <div class="workflowchecklist">
+      ${(workflowSteps||[]).map((x,idx)=>`<div class="workflowstep ${x.completed_at?'done':(!x.completed_at&&(workflowSteps||[]).findIndex(w=>!w.completed_at)===idx?'current':'')}">
+        <span>${x.completed_at?'✓':(!x.completed_at&&(workflowSteps||[]).findIndex(w=>!w.completed_at)===idx?'•':'○')}</span>
+        <b>${esc(x.label_ar)}</b>
+      </div>`).join('')||'<div class="empty">لا توجد مراحل تنفيذ.</div>'}
+    </div>
+
+    <h3>المستندات المطلوبة</h3>
+    <div class="deliverychecklist">
+      ${(deliverables||[]).map(x=>{
+        const d=finalByDeliverable[x.id];
+        return `<div class="deliveryitem ${d?'done':''}">
+          <div class="deliverylabel"><span class="deliverystatus">${d?'✓':'○'}</span><span><b>${esc(x.service_name_ar)}</b><small>${d?'تم رفع المستند النهائي':'بانتظار المستند النهائي'}</small></span></div>
+          ${d?`<button class="secondary compact" data-file-view="${esc(d.storage_path)}" data-file-name="${esc(d.original_name||'مستند')}" data-file-mime="${esc(d.mime_type||'')}">عرض</button>`:''}
+        </div>`;
+      }).join('')||'<div class="empty">لا توجد مستندات مطلوبة.</div>'}
+    </div>
 
     <h3>الملفات</h3>
     <div class="stack">${docs.length?docs.map(d=>`<div class="adminrow"><span><b>${esc(d.original_name||'ملف')}</b><small>${esc(d.kind)}</small></span><button class="secondary compact" data-file-view="${esc(d.storage_path)}" data-file-name="${esc(d.original_name||'مستند')}" data-file-mime="${esc(d.mime_type||'')}">عرض</button></div>`).join(''):'<div class="empty">لا توجد ملفات.</div>'}</div>
