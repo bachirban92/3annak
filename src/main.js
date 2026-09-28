@@ -170,7 +170,7 @@ async function customerPortal(){
   }
   const paymentByOrder={};
   for(const p of paymentRows){if(!paymentByOrder[p.order_id])paymentByOrder[p.order_id]=p;}
-  const needsCustomerAction=o=>(missingByOrder[o.id]||0)>0||o.customer_submission_ready===false||(o.status==='accepted'&&o.assigned_agent_id&&paymentByOrder[o.id]?.status!=='paid');
+  const needsCustomerAction=o=>(missingByOrder[o.id]||0)>0||o.customer_submission_ready===false;
   const actionCount=current.filter(needsCustomerAction).length;
 
   const orderState=o=>{
@@ -179,8 +179,8 @@ async function customerPortal(){
     if(o.customer_submission_ready===false)return {kind:'action',title:'مطلوب منك',text:'أرسل الطلب للوكلاء بعد مراجعة البيانات'};
     if(o.refund_pending)return {kind:'waiting',title:'قيد المعالجة',text:'رد المبلغ قيد المعالجة'};
     if(o.status==='submitted'&&!o.assigned_agent_id)return {kind:'waiting',title:'بانتظار وكيل',text:'سنظهر الطلب للوكلاء المؤهلين'};
-    if(o.assigned_agent_id&&o.status==='accepted'&&paymentByOrder[o.id]?.status!=='paid')return {kind:'action',title:'تم تعيين وكيل',text:'أكمل الدفع ليبدأ التنفيذ'};
-    if(o.assigned_agent_id&&o.status==='accepted')return {kind:'ok',title:'تم تعيين وكيل',text:'تم الدفع ويمكن للوكيل البدء'};
+    if(o.assigned_agent_id&&o.status==='accepted'&&paymentByOrder[o.id]?.status!=='paid')return {kind:'waiting',title:'تم تعيين وكيل',text:'الوكيل يعمل على طلبك • الدفع نقداً عند الانتهاء'};
+    if(o.assigned_agent_id&&o.status==='accepted')return {kind:'ok',title:'تم تعيين وكيل',text:'تم تأكيد الدفع'};
     return {kind:'waiting',title:labels[o.status]||o.status,text:o.expected_ready_at?`متوقع ${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}`:''};
   };
 
@@ -571,9 +571,9 @@ async function customerDetail(id){
       :o.status==='submitted'&&!o.assigned_agent_id
         ?{kind:'waiting',title:'بانتظار قبول وكيل',text:'طلبك جاهز ويظهر للوكلاء المؤهلين.'}
         :o.status==='accepted'&&payment?.status!=='paid'
-          ?{kind:'action',title:'الدفع مطلوب الآن',text:'تم قبول طلبك من وكيل. أكمل الدفع ليبدأ التنفيذ.'}
+          ?{kind:'waiting',title:'الوكيل يعمل على طلبك',text:'الدفع نقداً للوكيل عند انتهاء العمل وقبل استلام المستندات.'}
           :o.status==='accepted'
-            ?{kind:'ok',title:'تم تعيين وكيل',text:'تم تأكيد الدفع ويمكن للوكيل بدء التنفيذ.'}
+            ?{kind:'ok',title:'تم تعيين وكيل',text:'تم تأكيد الدفع.'}
           :o.status==='completed'
             ?{kind:'ok',title:'اكتمل الطلب',text:finalDocs.length?'مستنداتك النهائية جاهزة للعرض والتنزيل.':'تم إكمال الطلب.'}
             :o.status==='cancelled'
@@ -606,7 +606,7 @@ async function customerDetail(id){
     </section>
 
     ${payment?`<div class="paymentbox">
-      <div><small>الدفع</small><b>${paymentLabel}</b>${payment?.status==='paid'&&paymentMethodLabel?`<small>طريقة الدفع: ${esc(paymentMethodLabel)}</small>`:''}${payment?.status==='pending'&&!o.assigned_agent_id?'<small>لن يُطلب منك الدفع قبل قبول وكيل.</small>':''}${payment?.status!=='paid'&&o.assigned_agent_id?'<small>الدفع الحالي: نقداً — بانتظار تسجيل الدفعة.</small>':''}</div>
+      <div><small>الدفع</small><b>${paymentLabel}</b>${payment?.status==='paid'&&paymentMethodLabel?`<small>طريقة الدفع: ${esc(paymentMethodLabel)}</small>`:''}${payment?.status==='pending'&&!o.assigned_agent_id?'<small>لن يُطلب منك الدفع قبل قبول وكيل.</small>':''}${payment?.status!=='paid'&&o.assigned_agent_id?'<small>الدفع نقداً للوكيل عند انتهاء العمل. لا تعطِ رمز الدفع قبل تسليم المبلغ.</small>':''}</div>
       <strong>${money(payment?.amount??o.total_amount)}</strong>
     </div>`:''}
 
