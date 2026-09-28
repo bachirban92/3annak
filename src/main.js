@@ -2441,6 +2441,62 @@ function bind(){
     agentPortal();
   });
 
+  const customerIdUpload=document.querySelector('[data-customer-id-upload]');
+  if(customerIdUpload)customerIdUpload.onclick=async()=>{
+    const input=document.querySelector('#customerIdentityFile');
+    const file=input?.files?.[0];
+    if(!file)return toast('اختر مستند الهوية أولاً',true);
+    if(file.size>10*1024*1024)return toast('الحد الأقصى للملف 10MB',true);
+    if(!['application/pdf','image/jpeg','image/png','image/webp'].includes(file.type))return toast('نوع الملف غير مدعوم',true);
+
+    busy(customerIdUpload,true,'جارٍ الرفع...');
+    const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+    const path=session.user.id+'/'+crypto.randomUUID()+'-'+safe;
+    const up=await supabase.storage.from('customer-id-files').upload(path,file);
+    if(up.error){busy(customerIdUpload,false);return toast(up.error.message,true)}
+
+    const old=customerIdentity?.storage_path;
+    const saved=await supabase.rpc('submit_customer_identity_document',{
+      p_storage_path:path,
+      p_original_name:file.name,
+      p_mime_type:file.type,
+      p_file_size:file.size
+    });
+    if(saved.error){
+      await supabase.storage.from('customer-id-files').remove([path]);
+      busy(customerIdUpload,false);
+      return toast(saved.error.message,true);
+    }
+
+    if(old&&old!==path)await supabase.storage.from('customer-id-files').remove([old]);
+    customerIdentity=saved.data;
+    busy(customerIdUpload,false);
+    toast('تم إرسال الهوية للمراجعة');
+    accountPage();
+  };
+
+  document.querySelectorAll('[data-customer-id-view]').forEach(x=>x.onclick=async()=>{
+    busy(x,true,'جارٍ الفتح...');
+    const {data,error}=await supabase.storage.from('customer-id-files').createSignedUrl(x.dataset.customerIdView,300);
+    busy(x,false);
+    if(error)return toast(error.message,true);
+    window.open(data.signedUrl,'_blank','noopener');
+  });
+
+  document.querySelectorAll('[data-customer-id-review]').forEach(x=>x.onclick=async()=>{
+    let reason='';
+    if(x.dataset.reviewStatus==='rejected')reason=prompt('سبب الرفض')||'';
+    if(x.dataset.reviewStatus==='rejected'&&!reason.trim())return toast('اكتب سبب الرفض',true);
+    busy(x,true);
+    const {error}=await supabase.rpc('admin_review_customer_identity',{
+      p_user_id:x.dataset.customerIdReview,
+      p_status:x.dataset.reviewStatus,
+      p_reason:reason||null
+    });
+    busy(x,false);
+    error?toast(error.message,true):(toast(x.dataset.reviewStatus==='approved'?'تم اعتماد الهوية':'تم رفض الهوية'),admin('customers'));
+  });
+
   document.querySelectorAll('[data-agent-doc-view]').forEach(x=>x.onclick=async()=>{
     busy(x,true,'جارٍ الفتح...');
     const {data,error}=await supabase.storage.from('agent-files').createSignedUrl(x.dataset.agentDocView,300);
