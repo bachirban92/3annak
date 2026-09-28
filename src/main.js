@@ -849,22 +849,21 @@ async function agentPortal(){
 
   const nextByOrder={};
   for(const o of mine||[]){
-    if(paymentsEnabled&&Number(o.total_amount||0)>0&&agentPaymentByOrder[o.id]?.status!=='paid'){
-      nextByOrder[o.id]={title:'بانتظار دفع العميل',text:'لا تبدأ التنفيذ قبل تأكيد الدفع',kind:'waiting'};
-      continue;
-    }
     const wf=workflowRows.filter(x=>x.order_id===o.id);
     const nextStep=wf.find(x=>!x.completed_at);
     const dels=deliverableRows.filter(x=>x.order_id===o.id);
     const doneIds=new Set(finalDocRows.filter(x=>x.order_id===o.id).map(x=>x.deliverable_id));
     const missing=dels.filter(x=>!doneIds.has(x.id)).length;
+    const paymentPending=paymentsEnabled&&Number(o.total_amount||0)>0&&agentPaymentByOrder[o.id]?.status!=='paid';
     nextByOrder[o.id]=nextStep
       ?{title:'الخطوة التالية',text:nextStep.label_ar,kind:'action'}
       :missing
         ?{title:'مطلوب منك',text:`ارفع ${missing} مستند نهائي`,kind:'action'}
-        :o.delivery_mode==='hard_copy'&&!o.hard_copy_delivered_at
-          ?{title:'مطلوب منك',text:'توصيل النسخة الورقية للعميل',kind:'action'}
-          :{title:'الخطوة التالية',text:'إكمال الطلب',kind:'action'};
+        :paymentPending
+          ?{title:'تحصيل الدفع النقدي',text:'استلم المبلغ ثم أدخل رمز العميل',kind:'action'}
+          :o.delivery_mode==='hard_copy'&&!o.hard_copy_delivered_at
+            ?{title:'مطلوب منك',text:'توصيل النسخة الورقية للعميل',kind:'action'}
+            :{title:'الخطوة التالية',text:'إكمال الطلب',kind:'action'};
   }
 
   app.innerHTML=shell(`<section class="role-dashboard">
