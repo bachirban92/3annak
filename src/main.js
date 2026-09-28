@@ -402,17 +402,19 @@ async function accountPage(){
   const isAgent=profile?.role==='agent';
   const isCustomer=profile?.role==='customer';
 
-  const [agentRes,coverageRes,addressRes,payoutRes]=await Promise.all([
+  const [agentRes,coverageRes,addressRes,payoutRes,identityRes]=await Promise.all([
     isAgent?supabase.from('agent_profiles').select('*').eq('user_id',session.user.id).maybeSingle():Promise.resolve({data:null}),
     isAgent?supabase.from('agent_coverage').select('*').eq('agent_id',session.user.id).eq('active',true):Promise.resolve({data:[]}),
     (isCustomer||isAgent)?supabase.from('customer_addresses').select('*').order('is_default',{ascending:false}).order('created_at',{ascending:false}):Promise.resolve({data:[]}),
-    isAgent?supabase.from('agent_payout_accounts').select('*').eq('user_id',session.user.id).maybeSingle():Promise.resolve({data:null})
+    isAgent?supabase.from('agent_payout_accounts').select('*').eq('user_id',session.user.id).maybeSingle():Promise.resolve({data:null}),
+    isCustomer?supabase.from('customer_identity_verifications').select('*').eq('user_id',session.user.id).maybeSingle():Promise.resolve({data:null})
   ]);
 
   const agent=agentRes.data;
   const coverage=coverageRes.data||[];
   const addresses=addressRes.data||[];
   const payout=payoutRes.data;
+  if(isCustomer)customerIdentity=identityRes.data||null;
 
   app.innerHTML=shell(`<section class="accountpage">
     ${isCustomer?customerNav('account'):isAgent?agentNav('account'):''}
@@ -2469,7 +2471,7 @@ function bind(){
     }
 
     if(old&&old!==path)await supabase.storage.from('customer-id-files').remove([old]);
-    customerIdentity=saved.data;
+    await load();
     busy(customerIdUpload,false);
     toast('تم إرسال الهوية للمراجعة');
     accountPage();
