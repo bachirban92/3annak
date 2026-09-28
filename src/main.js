@@ -2458,6 +2458,35 @@ function bind(){
     toast('أصبح الطلب لك');agentJob(x.dataset.accept);
   });
 
+  document.querySelectorAll('[data-generate-cash-pin]').forEach(x=>x.onclick=async()=>{
+    busy(x,true,'جارٍ إنشاء الرمز...');
+    const {data,error}=await supabase.rpc('customer_generate_cash_payment_pin',{p_order_id:x.dataset.generateCashPin});
+    busy(x,false);
+    if(error)return toast(error.message==='work_not_ready'?'الطلب لم يجهز للدفع بعد':error.message,true);
+    const holder=x.closest('.completebox')?.querySelector('[data-cash-pin-result]');
+    if(holder)holder.innerHTML='<strong style="font-size:24px;letter-spacing:4px">'+esc(data)+'</strong><small>لا تعطِ الرمز للوكيل قبل تسليم المبلغ نقداً.</small>';
+  });
+
+  const cashPinForm=document.querySelector('#cashPinForm');
+  if(cashPinForm)cashPinForm.onsubmit=async e=>{
+    e.preventDefault();
+    const b=cashPinForm.querySelector('button');
+    const pin=String(new FormData(cashPinForm).get('pin')||'').trim();
+    busy(b,true,'جارٍ التأكيد...');
+    const {data,error}=await supabase.rpc('agent_confirm_cash_payment',{p_order_id:cashPinForm.dataset.orderId,p_pin:pin});
+    busy(b,false);
+    if(error)return toast(error.message,true);
+    if(data!=='paid'){
+      const msg=data==='invalid_cash_pin'?'الرمز غير صحيح':
+        data==='cash_pin_not_generated'?'اطلب من العميل إظهار رمز الدفع أولاً':
+        data==='cash_pin_locked'?'تم إيقاف الرمز بعد محاولات خاطئة. اطلب من العميل إنشاء رمز جديد.':
+        data==='cash_pin_already_used'?'تم استخدام هذا الرمز مسبقاً':data;
+      return toast(msg,true);
+    }
+    toast('تم تأكيد الدفع النقدي');
+    agentJob(cashPinForm.dataset.orderId);
+  };
+
   document.querySelectorAll('[data-confirm-hard-copy]').forEach(x=>x.onclick=async()=>{
     if(!confirm('تأكيد أنك سلّمت النسخة الورقية للعميل؟'))return;
     busy(x,true,'جارٍ التأكيد...');
