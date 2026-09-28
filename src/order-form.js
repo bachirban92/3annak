@@ -168,9 +168,13 @@ export function bindServiceSelection({services,bundleItems,serviceRequirements,s
           <input type="file" name="req_file__${safeCode}" data-pre-req-code="${safeCode}" data-pre-req-type="file" ${required} accept=".pdf,image/jpeg,image/png,image/webp">
         </label>`;
       }
+      const defaultAddress=(savedAddresses||[]).find(a=>a.is_default);
+      const preset=r.code==='applicant_address'&&defaultAddress
+        ?[defaultAddress.address_line1,defaultAddress.address_line2,defaultAddress.city,defaultAddress.region,defaultAddress.country].filter(Boolean).join('، ')
+        :'';
       return `<label class="prereq">
         <span><b>${escAttr(r.label_ar)}</b><small>${badge}</small></span>
-        <input name="req_text__${safeCode}" data-pre-req-code="${safeCode}" data-pre-req-type="text" ${required} placeholder="${escAttr(r.label_ar)}">
+        <input name="req_text__${safeCode}" data-pre-req-code="${safeCode}" data-pre-req-type="text" ${required} value="${escAttr(preset)}" placeholder="${escAttr(r.label_ar)}">
       </label>`;
     }).join('');
     reqSection.hidden=false;
