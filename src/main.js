@@ -979,6 +979,19 @@ async function agentJob(id){
     <h3>التتبّع</h3>
     <div class="timeline">${(events||[]).map(x=>`<div><b>${esc(x.label_ar)}</b><small>${new Date(x.created_at).toLocaleString('ar-LB')}</small></div>`).join('')}</div>
 
+    <details class="order-section">
+      <summary>الدعم</summary>
+      <div class="order-section-body">
+        ${feedback?.dispute&&['open','reviewing'].includes(feedback.dispute.status)
+          ?`<div class="feedbackdone"><b>${feedback.dispute.status==='reviewing'?'طلب الدعم قيد المراجعة':'طلب الدعم مفتوح'}</b><small>${esc(feedback.dispute.reason)}</small></div>`
+          :`${feedback?.dispute?.resolution?`<div class="feedbackdone"><b>رد الإدارة</b><small>${esc(feedback.dispute.resolution)}</small></div>`:''}
+            <form id="supportForm" data-order-id="${o.id}" class="feedbackform">
+              <textarea name="reason" required minlength="3" placeholder="اشرح المشكلة باختصار"></textarea>
+              <button class="secondary full">طلب دعم</button>
+            </form>`}
+      </div>
+    </details>
+
     ${next?`
       ${next[0]==='completed'&&missingDeliverables.length?`<div class="completebox requirementgate"><span class="completecheck">!</span><div><b>أكمل المستندات النهائية</b><small>باقي ${missingDeliverables.length} مستند قبل إكمال الطلب.</small></div></div>`:''}
       <button class="primary full next-action" data-status="${next[0]}" data-id="${o.id}" ${next[0]==='completed'&&(missingDeliverables.length||hardCopyPending)?'disabled':''}>${next[1]}</button>
@@ -1288,6 +1301,19 @@ async function adminOrder(id){
   }
   const o=pack.order,items=pack.items||[],events=pack.events||[],docs=pack.documents||[],reqs=pack.requirements||[];
   const payment=payments?.[0];
+
+  let eligibleAgents=agents||[];
+  if(eligibleAgents.length){
+    const ids=eligibleAgents.map(a=>a.user_id);
+    const {data:coverageRows}=await supabase.from('agent_coverage')
+      .select('agent_id,governorate,active')
+      .in('agent_id',ids)
+      .eq('active',true);
+    const eligibleIds=new Set((coverageRows||[])
+      .filter(x=>String(x.governorate||'').trim().toLowerCase()===String(o.governorate||'').trim().toLowerCase())
+      .map(x=>x.agent_id));
+    eligibleAgents=eligibleAgents.filter(a=>eligibleIds.has(a.user_id));
+  }
   app.innerHTML=shell(`<section class="card">
     <div class="title"><h2>${esc(o.public_code)}</h2><button data-go="admin">رجوع</button></div>
     <div class="jobinfo">
@@ -1312,29 +1338,33 @@ async function adminOrder(id){
     </div>
 
     <h3>إدارة الطلب</h3>
+    <div class="info-box">
+      <b>${labels[o.status]||o.status}</b>
+      <small>حالة الطلب تتغير من خلال مسار التنفيذ، وليس يدوياً.</small>
+    </div>
+
     <form id="adminStatusForm">
-      <select name="status">
-        ${Object.entries(labels).filter(([k])=>k!=='cancelled').map(([k,v])=>`<option value="${k}" ${o.status===k?'selected':''}>${v}</option>`).join('')}
-      </select>
-      <input name="note" placeholder="ملاحظة للإدارة (اختياري)">
-      <button class="secondary full">حفظ الحالة</button>
+      <input type="hidden" name="status" value="${o.status}">
+      <input name="note" required minlength="2" placeholder="إضافة ملاحظة على الطلب">
+      <button class="secondary full">إضافة الملاحظة</button>
     </form>
 
-    <form id="adminAssignForm">
+    ${!['completed','cancelled'].includes(o.status)?`<form id="adminAssignForm">
       <select name="agent" required>
-        <option value="">تعيين / إعادة تعيين وكيل</option>
-        ${(agents||[]).map(a=>`<option value="${a.user_id}" ${o.assigned_agent_id===a.user_id?'selected':''}>${esc(agentNames[a.user_id]?.full_name||agentNames[a.user_id]?.email||a.user_id)}</option>`).join('')}
+        <option value="">${o.assigned_agent_id?'اختر وكيلاً لإعادة التعيين':'اختر وكيلاً للتعيين'}</option>
+        ${eligibleAgents.filter(a=>a.user_id!==o.assigned_agent_id).map(a=>`<option value="${a.user_id}">${esc(agentNames[a.user_id]?.full_name||agentNames[a.user_id]?.email||a.user_id)}</option>`).join('')}
       </select>
-      <button class="secondary full">تعيين الوكيل</button>
-    </form>
+      <input name="reason" ${o.assigned_agent_id?'required':''} placeholder="${o.assigned_agent_id?'سبب إعادة التعيين':'سبب التعيين (اختياري)'}">
+      <button class="secondary full" ${eligibleAgents.filter(a=>a.user_id!==o.assigned_agent_id).length?'':'disabled'}>${o.assigned_agent_id?'إعادة تعيين الوكيل':'تعيين الوكيل'}</button>
+    </form>`:''}
 
-    <button class="danger full" data-admin-cancel="${o.id}">إلغاء الطلب</button>
+    ${!['completed','cancelled'].includes(o.status)?`<button class="danger full" data-admin-cancel="${o.id}">إلغاء الطلب</button>`:''}
 
     <h3>المتطلبات</h3>
     <div class="stack">${reqs.length?reqs.map(r=>`<div class="adminrow"><span><b>${esc(r.label_ar)}</b><small>${r.required?'مطلوب':'اختياري'}</small></span><i>${r.completed_at?'مكتمل':'ناقص'}</i></div>`).join(''):'<div class="empty">لا توجد متطلبات.</div>'}</div>
 
     <h3>الملفات</h3>
-    <div class="stack">${docs.length?docs.map(d=>`<div class="adminrow"><span><b>${esc(d.original_name||'ملف')}</b><small>${esc(d.kind)}</small></span></div>`).join(''):'<div class="empty">لا توجد ملفات.</div>'}</div>
+    <div class="stack">${docs.length?docs.map(d=>`<div class="adminrow"><span><b>${esc(d.original_name||'ملف')}</b><small>${esc(d.kind)}</small></span><button class="secondary compact" data-file-view="${esc(d.storage_path)}" data-file-name="${esc(d.original_name||'مستند')}" data-file-mime="${esc(d.mime_type||'')}">عرض</button></div>`).join(''):'<div class="empty">لا توجد ملفات.</div>'}</div>
 
     <h3>التتبّع</h3>
     <div class="timeline">${events.map(e=>`<div><b>${esc(e.label_ar)}</b><small>${new Date(e.created_at).toLocaleString('ar-LB')}</small></div>`).join('')}</div>
@@ -1918,7 +1948,7 @@ function bind(){
       return toast(msg,true);
     }
     toast('تم إرسال طلب الدعم');
-    customerDetail(supportForm.dataset.orderId);
+    profile?.role==='agent'?agentJob(supportForm.dataset.orderId):customerDetail(supportForm.dataset.orderId);
   };
 
   bindServiceSelection({services,bundleItems,serviceRequirements,savedProperties:customerProperties,savedAddresses:customerAddresses,deliveryConfig,money,toast});
@@ -2340,7 +2370,7 @@ function bind(){
   if(adminAssign)adminAssign.onsubmit=async e=>{
     e.preventDefault();const d=new FormData(adminAssign),b=adminAssign.querySelector('button');busy(b,true);
     const id=location.hash.split('/')[1];
-    const {error}=await supabase.rpc('admin_reassign_order',{p_order_id:id,p_agent_id:d.get('agent'),p_reason:''});
+    const {error}=await supabase.rpc('admin_reassign_order',{p_order_id:id,p_agent_id:d.get('agent'),p_reason:d.get('reason')||''});
     busy(b,false);error?toast(error.message,true):(toast('تم تعيين الوكيل'),adminOrder(id));
   };
 
