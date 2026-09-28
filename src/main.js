@@ -2090,16 +2090,13 @@ function bind(){
           return customerDetail(orderId);
         }
 
-        const ins=await supabase.from('documents').insert({
-          order_id:orderId,
-          kind:'customer_attachment',
-          storage_path:path,
-          original_name:file.name,
-          mime_type:file.type,
-          file_size:file.size,
-          visible_to_customer:true,
-          uploaded_by:session.user.id
-        }).select('id').single();
+        const ins=await supabase.rpc('register_customer_attachment',{
+          p_order_id:orderId,
+          p_storage_path:path,
+          p_original_name:file.name,
+          p_mime_type:file.type,
+          p_file_size:file.size
+        });
 
         if(ins.error){
           await supabase.storage.from('order-files').remove([path]);
@@ -2111,10 +2108,10 @@ function bind(){
         const done=await supabase.rpc('complete_order_requirement',{
           p_order_requirement_id:req.id,
           p_value_text:null,
-          p_document_id:ins.data.id
+          p_document_id:ins.data?.id
         });
         if(done.error){
-          await supabase.from('documents').delete().eq('id',ins.data.id);
+          if(ins.data?.id)await supabase.from('documents').delete().eq('id',ins.data.id);
           await supabase.storage.from('order-files').remove([path]);
           busy(b,false);
           toast('تم إنشاء الطلب، لكن تعذر إكمال '+req.label_ar,true);
