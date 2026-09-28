@@ -314,10 +314,19 @@ async function customerPaymentsPage(){
   app.innerHTML=shell(`<section class="role-dashboard">
     ${customerNav()}
     <div class="title"><h2>الدفع</h2><button data-go="account">رجوع</button></div>
-    ${!paymentsEnabled?'<div class="info-box"><b>الدفع الإلكتروني غير مفعّل حالياً.</b><small>ستظهر طرق الدفع المحفوظة هنا بعد ربط مزود الدفع.</small></div>':''}
+    <div class="info-box"><b>طريقة الدفع الحالية: نقداً</b><small>يتم تسجيل الدفع بعد استلام المبلغ. يمكن إضافة التحويل لاحقاً.</small></div>
     <section class="dashboard-panel">
       <h3>سجل الدفع</h3>
-      <div class="stack">${payments.map(p=>`<div class="account-list-row"><div><b>${esc(byOrder[p.order_id]?.public_code||'طلب')}</b><small>${new Date(p.created_at).toLocaleDateString('ar-LB')}</small></div><div><b>${money(p.amount)}</b><small>${p.status==='paid'?'مدفوع':p.status==='refunded'?'مردود':p.status==='failed'?'فشل':'قيد الانتظار'}</small></div></div>`).join('')||'<div class="empty">لا توجد عمليات دفع.</div>'}</div>
+      <div class="stack">${payments.map(p=>`<div class="account-list-row">
+        <div>
+          <b>${esc(byOrder[p.order_id]?.public_code||'طلب')}</b>
+          <small>${p.status==='paid'&&p.paid_at?new Date(p.paid_at).toLocaleString('ar-LB'):new Date(p.created_at).toLocaleDateString('ar-LB')}</small>
+        </div>
+        <div>
+          <b>${money(p.amount)}</b>
+          <small>${p.status==='paid'?'مدفوع نقداً':p.status==='refunded'?'تم رد المبلغ':p.status==='failed'?'تعذر تسجيل الدفع':'غير مدفوع'}${p.provider_reference?' • '+esc(p.provider_reference):''}</small>
+        </div>
+      </div>`).join('')||'<div class="empty">لا توجد عمليات دفع.</div>'}</div>
     </section>
   </section>`);
   bind();
@@ -538,7 +547,7 @@ async function customerDetail(id){
   const finalDocs=(d||[]).filter(x=>x.kind==='final_document');
   const payment=payments?.[0];
   const paymentLabel=o.refund_pending?'رد المبلغ قيد المعالجة':
-    payment?.status==='paid'?'مدفوع':
+    payment?.status==='paid'?'مدفوع نقداً':
     payment?.status==='refunded'?'تم رد المبلغ':
     payment?.status==='failed'?'فشل الدفع':'بانتظار الدفع';
 
@@ -584,7 +593,7 @@ async function customerDetail(id){
     </section>
 
     ${(paymentsEnabled||o.refund_pending||['paid','refunded','partially_refunded'].includes(payment?.status))?`<div class="paymentbox">
-      <div><small>الدفع</small><b>${paymentLabel}</b></div>
+      <div><small>الدفع</small><b>${paymentLabel}</b>${payment?.status==='paid'?'<small>طريقة الدفع: نقداً</small>':''}</div>
       <strong>${money(payment?.amount??o.total_amount)}</strong>
     </div>`:''}
 
@@ -1316,7 +1325,7 @@ async function adminAgent(id){
         <span><b>${money(x.amount)} ${esc(x.currency||'USD')}</b><small>${x.status==='paid'?'مدفوع':x.status==='pending'?'بانتظار التحويل':x.status==='void'?'ملغى':esc(x.status)} • ${new Date(x.created_at).toLocaleDateString('ar-LB')}</small></span>
         <div class="row-actions">
           ${x.status==='pending'?`
-            <button class="primary compact" data-payout-paid="${x.id}" data-agent-id="${id}">تسجيل مدفوع</button>
+            <button class="primary compact" data-payout-paid="${x.id}" data-agent-id="${id}">تسجيل دفعة نقدية</button>
             <button class="secondary compact" data-payout-cancel="${x.id}" data-agent-id="${id}">إلغاء الدفعة</button>
           `:''}
         </div>
@@ -1390,7 +1399,7 @@ async function adminOrder(id){
   }
 
   const paymentLabel=o.refund_pending?'رد المبلغ قيد المعالجة':
-    payment?.status==='paid'?'مدفوع':
+    payment?.status==='paid'?'مدفوع نقداً':
     payment?.status==='refunded'?'تم رد المبلغ':
     payment?.status==='failed'?'فشل الدفع':'بانتظار الدفع';
 
@@ -1485,7 +1494,7 @@ async function adminOrder(id){
       <div class="adminrow paymentadmin">
         <span><b>${paymentLabel}</b><small>${payment?.provider_reference?esc(payment.provider_reference):''}</small></span>
         <div class="paymentactions">
-          ${payment&&['pending','failed'].includes(payment.status)?`<button class="secondary compact" data-mark-payment-paid="${payment.id}" data-order-id="${o.id}">تسجيل مدفوع</button>`:''}
+          ${payment&&['pending','failed'].includes(payment.status)?`<button class="secondary compact" data-mark-payment-paid="${payment.id}" data-order-id="${o.id}">تسجيل دفعة نقدية</button>`:''}
           ${payment&&payment.status==='paid'&&o.status==='cancelled'?`<button class="secondary compact" data-mark-payment-refunded="${payment.id}" data-order-id="${o.id}">تسجيل رد المبلغ</button>`:''}
         </div>
       </div>
@@ -2594,7 +2603,7 @@ function bind(){
     busy(x,true);
     const {error}=await supabase.rpc('admin_mark_payment_paid',{
       p_payment_id:x.dataset.markPaymentPaid,
-      p_provider:'manual',
+      p_provider:'cash',
       p_provider_reference:null
     });
     busy(x,false);
@@ -2638,7 +2647,7 @@ function bind(){
     busy(x,true);
     const {error}=await supabase.rpc('admin_mark_payout_paid',{
       p_payout_id:x.dataset.payoutPaid,
-      p_provider:'manual',
+      p_provider:'cash',
       p_reference:reference||null
     });
     busy(x,false);
