@@ -152,21 +152,26 @@ async function customerPortal(){
   const completed=rows.filter(o=>o.status==='completed');
   const currentIds=current.map(o=>o.id);
 
-  let reqRows=[];
+  let reqRows=[],paymentRows=[];
   if(currentIds.length){
-    const r=await supabase.from('order_requirements')
-      .select('id,order_id,required,completed_at')
-      .in('order_id',currentIds)
-      .eq('required',true);
+    const [r,p]=await Promise.all([
+      supabase.from('order_requirements').select('id,order_id,required,completed_at').in('order_id',currentIds).eq('required',true),
+      supabase.from('payments').select('order_id,status,provider,created_at').in('order_id',currentIds).order('created_at',{ascending:false})
+    ]);
     if(r.error)return toast(r.error.message,true);
+    if(p.error)return toast(p.error.message,true);
     reqRows=r.data||[];
+    paymentRows=p.data||[];
   }
 
   const missingByOrder={};
   for(const r of reqRows){
     if(!r.completed_at)missingByOrder[r.order_id]=(missingByOrder[r.order_id]||0)+1;
   }
-  const actionCount=current.filter(o=>(missingByOrder[o.id]||0)>0||o.customer_submission_ready===false).length;
+  const paymentByOrder={};
+  for(const p of paymentRows){if(!paymentByOrder[p.order_id])paymentByOrder[p.order_id]=p;}
+  const needsCustomerAction=o=>(missingByOrder[o.id]||0)>0||o.customer_submission_ready===false||(o.status==='accepted'&&o.assigned_agent_id&&paymentByOrder[o.id]?.status!=='paid');
+  const actionCount=current.filter(needsCustomerAction).length;
 
   const orderState=o=>{
     const missing=missingByOrder[o.id]||0;
@@ -174,7 +179,8 @@ async function customerPortal(){
     if(o.customer_submission_ready===false)return {kind:'action',title:'مطلوب منك',text:'أرسل الطلب للوكلاء بعد مراجعة البيانات'};
     if(o.refund_pending)return {kind:'waiting',title:'قيد المعالجة',text:'رد المبلغ قيد المعالجة'};
     if(o.status==='submitted'&&!o.assigned_agent_id)return {kind:'waiting',title:'بانتظار وكيل',text:'سنظهر الطلب للوكلاء المؤهلين'};
-    if(o.assigned_agent_id&&o.status==='accepted')return {kind:'ok',title:'تم تعيين وكيل',text:'سيبدأ تنفيذ الطلب'};
+    if(o.assigned_agent_id&&o.status==='accepted'&&paymentByOrder[o.id]?.status!=='paid')return {kind:'action',title:'تم تعيين وكيل',text:'أكمل الدفع ليبدأ التنفيذ'};
+    if(o.assigned_agent_id&&o.status==='accepted')return {kind:'ok',title:'تم تعيين وكيل',text:'تم الدفع ويمكن للوكيل البدء'};
     return {kind:'waiting',title:labels[o.status]||o.status,text:o.expected_ready_at?`متوقع ${new Date(o.expected_ready_at).toLocaleDateString('ar-LB')}`:''};
   };
 
@@ -200,8 +206,8 @@ async function customerPortal(){
     ${actionCount?`<section class="dashboard-panel attention-panel">
       <div class="dashboard-panel-head"><h3>مطلوب منك</h3></div>
       <div class="stack">
-        ${current.filter(o=>(missingByOrder[o.id]||0)>0||o.customer_submission_ready===false).map(o=>`<button class="action-row" data-order="${o.id}">
-          <span><b>${o.public_code}</b><small>${(missingByOrder[o.id]||0)>0?`أكمل ${missingByOrder[o.id]} عنصر مطلوب`:'راجع البيانات وأرسل الطلب للوكلاء'}</small></span>
+        ${current.filter(needsCustomerAction).map(o=>`<button class="action-row" data-order="${o.id}">
+          <span><b>${o.public_code}</b><small>${(missingByOrder[o.id]||0)>0?`أكمل ${missingByOrder[o.id]} عنصر مطلوب`:o.customer_submission_ready===false?'راجع البيانات وأرسل الطلب للوكلاء':'أكمل الدفع ليبدأ الوكيل التنفيذ'}</small></span>
           <strong>فتح</strong>
         </button>`).join('')}
       </div>
@@ -222,6 +228,9 @@ async function customerPortal(){
   liveChannel=supabase.channel('customer-dashboard-'+session.user.id)
     .on('postgres_changes',{event:'*',schema:'public',table:'orders',filter:`customer_id=eq.${session.user.id}`},()=>customerPortal())
     .on('postgres_changes',{event:'*',schema:'public',table:'order_requirements'},payload=>{
+      if(currentIds.includes(payload.new?.order_id||payload.old?.order_id))customerPortal();
+    })
+    .on('postgres_changes',{event:'*',schema:'public',table:'payments'},payload=>{
       if(currentIds.includes(payload.new?.order_id||payload.old?.order_id))customerPortal();
     })
     .subscribe();
@@ -597,7 +606,7 @@ async function customerDetail(id){
     </section>
 
     ${payment?`<div class="paymentbox">
-      <div><small>الدفع</small><b>${paymentLabel}</b>${payment?.status==='paid'&&paymentMethodLabel?`<small>طريقة الدفع: ${esc(paymentMethodLabel)}</small>`:''}${payment?.status==='pending'&&!o.assigned_agent_id?'<small>لن يُطلب منك الدفع قبل قبول وكيل.</small>':''}</div>
+      <div><small>الدفع</small><b>${paymentLabel}</b>${payment?.status==='paid'&&paymentMethodLabel?`<small>طريقة الدفع: ${esc(paymentMethodLabel)}</small>`:''}${payment?.status==='pending'&&!o.assigned_agent_id?'<small>لن يُطلب منك الدفع قبل قبول وكيل.</small>':''}${payment?.status!=='paid'&&o.assigned_agent_id?'<small>الدفع الحالي: نقداً — بانتظار تسجيل الدفعة.</small>':''}</div>
       <strong>${money(payment?.amount??o.total_amount)}</strong>
     </div>`:''}
 
@@ -675,6 +684,7 @@ async function customerDetail(id){
   liveChannel=supabase.channel('customer-order-'+id)
     .on('postgres_changes',{event:'*',schema:'public',table:'order_events',filter:`order_id=eq.${id}`},()=>customerDetail(id))
     .on('postgres_changes',{event:'UPDATE',schema:'public',table:'orders',filter:`id=eq.${id}`},()=>customerDetail(id))
+    .on('postgres_changes',{event:'*',schema:'public',table:'payments',filter:`order_id=eq.${id}`},()=>customerDetail(id))
     .subscribe();
 }
 function agentAuthChoice(){
@@ -814,21 +824,29 @@ async function agentPortal(){
   const bal=balance?.[0]||{pending:0,available:0};
   const mineIds=(mine||[]).map(o=>o.id);
 
-  let workflowRows=[],deliverableRows=[],finalDocRows=[];
+  let workflowRows=[],deliverableRows=[],finalDocRows=[],agentPaymentRows=[];
   if(mineIds.length){
-    const [w,dv,fd]=await Promise.all([
+    const [w,dv,fd,p]=await Promise.all([
       supabase.from('order_workflow_steps').select('*').in('order_id',mineIds).order('sort_order'),
       supabase.from('order_deliverables').select('id,order_id').in('order_id',mineIds),
-      supabase.from('documents').select('id,order_id,deliverable_id,kind').in('order_id',mineIds).eq('kind','final_document')
+      supabase.from('documents').select('id,order_id,deliverable_id,kind').in('order_id',mineIds).eq('kind','final_document'),
+      supabase.from('payments').select('order_id,status,created_at').in('order_id',mineIds).order('created_at',{ascending:false})
     ]);
     if(w.error)return toast(w.error.message,true);
     if(dv.error)return toast(dv.error.message,true);
     if(fd.error)return toast(fd.error.message,true);
-    workflowRows=w.data||[];deliverableRows=dv.data||[];finalDocRows=fd.data||[];
+    if(p.error)return toast(p.error.message,true);
+    workflowRows=w.data||[];deliverableRows=dv.data||[];finalDocRows=fd.data||[];agentPaymentRows=p.data||[];
   }
+  const agentPaymentByOrder={};
+  for(const p of agentPaymentRows){if(!agentPaymentByOrder[p.order_id])agentPaymentByOrder[p.order_id]=p;}
 
   const nextByOrder={};
   for(const o of mine||[]){
+    if(paymentsEnabled&&Number(o.total_amount||0)>0&&agentPaymentByOrder[o.id]?.status!=='paid'){
+      nextByOrder[o.id]={title:'بانتظار دفع العميل',text:'لا تبدأ التنفيذ قبل تأكيد الدفع',kind:'waiting'};
+      continue;
+    }
     const wf=workflowRows.filter(x=>x.order_id===o.id);
     const nextStep=wf.find(x=>!x.completed_at);
     const dels=deliverableRows.filter(x=>x.order_id===o.id);
@@ -873,7 +891,7 @@ async function agentPortal(){
       <div class="dashboard-panel-head"><h3>طلباتي الحالية</h3></div>
       <div class="stack">${(mine||[]).map(o=>{const a=nextByOrder[o.id];return `<button class="order-dashboard-row" data-agent-order="${o.id}">
         <span class="order-dashboard-main"><b>${o.public_code}</b><small>${esc(o.cadastral_area)} • ${esc(o.property_number)}</small></span>
-        <span class="order-dashboard-state action"><b>${labels[o.status]||o.status}</b><small>${esc(a?.text||'')}</small></span>
+        <span class="order-dashboard-state ${a?.kind||'action'}"><b>${a?.title||labels[o.status]||o.status}</b><small>${esc(a?.text||'')}</small></span>
       </button>`}).join('')||'<div class="empty">لا يوجد طلبات حالية.</div>'}</div>
     </section>
 
@@ -906,6 +924,9 @@ async function agentPortal(){
     })
     .on('postgres_changes',{event:'UPDATE',schema:'public',table:'orders',filter:`assigned_agent_id=eq.${session.user.id}`},()=>agentPortal())
     .on('postgres_changes',{event:'*',schema:'public',table:'order_workflow_steps'},payload=>{
+      if(mineIds.includes(payload.new?.order_id||payload.old?.order_id))agentPortal();
+    })
+    .on('postgres_changes',{event:'*',schema:'public',table:'payments'},payload=>{
       if(mineIds.includes(payload.new?.order_id||payload.old?.order_id))agentPortal();
     })
     .subscribe();
@@ -1036,6 +1057,7 @@ async function agentJob(id){
 
   liveChannel=supabase.channel('agent-job-'+id)
     .on('postgres_changes',{event:'*',schema:'public',table:'order_events',filter:`order_id=eq.${id}`},()=>agentJob(id))
+    .on('postgres_changes',{event:'*',schema:'public',table:'payments',filter:`order_id=eq.${id}`},()=>agentJob(id))
     .subscribe();
 }
 async function adminAccess(){
