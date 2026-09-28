@@ -884,14 +884,15 @@ async function agentPortal(){
 }
 async function agentJob(id){
   clearLive();
-  const [{data:rows,error},{data:events},{data:docs},{data:deliverables},{data:workflow},{data:requirements},{data:deliveryOrder}]=await Promise.all([
+  const [{data:rows,error},{data:events},{data:docs},{data:deliverables},{data:workflow},{data:requirements},{data:deliveryOrder},{data:feedback}]=await Promise.all([
     supabase.rpc('get_agent_job',{p_order_id:id}),
     supabase.from('order_events').select('*').eq('order_id',id).order('created_at'),
     supabase.from('documents').select('*').eq('order_id',id).order('created_at'),
     supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order'),
     supabase.from('order_workflow_steps').select('*').eq('order_id',id).order('sort_order'),
     supabase.from('order_requirements').select('*').eq('order_id',id).order('created_at'),
-    supabase.from('orders').select('delivery_mode,delivery_address_line1,delivery_address_line2,delivery_city,delivery_region,delivery_postal_code,delivery_country,delivery_fee,delivery_agent_payout,hard_copy_delivered_at').eq('id',id).single()
+    supabase.from('orders').select('delivery_mode,delivery_address_line1,delivery_address_line2,delivery_city,delivery_region,delivery_postal_code,delivery_country,delivery_fee,delivery_agent_payout,hard_copy_delivered_at').eq('id',id).single(),
+    supabase.rpc('get_order_feedback',{p_order_id:id})
   ]);
   const o=rows?.[0];
   if(error||!o)return toast(error?.message||'تعذر فتح الطلب',true);
