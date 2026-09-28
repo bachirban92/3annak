@@ -1231,7 +1231,7 @@ async function adminAgent(id){
   clearLive();
   if(profile?.role!=='admin')return go('home');
 
-  const [{data:a,error},{data:p},{data:coverage},{data:orders},{data:ledger},{data:reqs},{data:docs},{data:payouts}]=await Promise.all([
+  const [{data:a,error},{data:p},{data:coverage},{data:orders},{data:ledger},{data:reqs},{data:docs},{data:payouts},{data:payoutAccount}]=await Promise.all([
     supabase.from('agent_profiles').select('*').eq('user_id',id).single(),
     supabase.from('profiles').select('id,full_name,email,phone,is_active').eq('id',id).single(),
     supabase.from('agent_coverage').select('*').eq('agent_id',id).eq('active',true),
@@ -1239,7 +1239,8 @@ async function adminAgent(id){
     supabase.from('agent_ledger').select('*').eq('agent_id',id).order('created_at',{ascending:false}).limit(100),
     supabase.from('agent_verification_requirements').select('*').eq('active',true).order('sort_order'),
     supabase.from('agent_documents').select('*').eq('agent_id',id),
-    supabase.from('payouts').select('*').eq('agent_id',id).order('created_at',{ascending:false}).limit(20)
+    supabase.from('payouts').select('*').eq('agent_id',id).order('created_at',{ascending:false}).limit(20),
+    supabase.from('agent_payout_accounts').select('*').eq('user_id',id).maybeSingle()
   ]);
 
   if(error||!a)return toast(error?.message||'تعذر فتح الوكيل',true);
@@ -1292,6 +1293,34 @@ async function adminAgent(id){
       <div><small>قيد التنفيذ</small><b>${money(pending)}</b></div>
       <div><small>متاح</small><b>${money(available)}</b></div>
       <div><small>مدفوع</small><b>${money(paid)}</b></div>
+    </div>
+
+    <h3>الحساب البنكي والدفعات</h3>
+    ${payoutAccount?`<div class="card payout-account-admin">
+      <div class="jobinfo">
+        <div><small>صاحب الحساب</small><b>${esc(payoutAccount.account_holder||'—')}</b></div>
+        <div><small>البنك</small><b>${esc(payoutAccount.bank_name||'—')}</b></div>
+        <div class="wide"><small>IBAN</small><b class="iban-value">${esc(payoutAccount.iban||'—')}</b></div>
+        <div><small>التحقق</small><b>${payoutAccount.is_verified?'معتمد':'غير معتمد'}</b></div>
+      </div>
+      <div class="adminagentactions">
+        <button class="${payoutAccount.is_verified?'secondary':'primary'}" data-payout-account-verify="${id}" data-verify-value="${payoutAccount.is_verified?'false':'true'}">
+          ${payoutAccount.is_verified?'إلغاء اعتماد الحساب':'اعتماد الحساب البنكي'}
+        </button>
+        ${available>0?`<button class="primary" data-create-payout="${id}" ${payoutAccount.is_verified?'':'disabled'}>إنشاء دفعة ${money(available)}</button>`:''}
+      </div>
+    </div>`:`<div class="info-box"><b>لا يوجد حساب تحويل</b><small>يجب على الوكيل حفظ بيانات الحساب البنكي قبل إنشاء أي دفعة.</small></div>`}
+
+    <div class="stack payout-list">
+      ${(payouts||[]).map(x=>`<div class="adminrow">
+        <span><b>${money(x.amount)} ${esc(x.currency||'USD')}</b><small>${x.status==='paid'?'مدفوع':x.status==='pending'?'بانتظار التحويل':x.status==='void'?'ملغى':esc(x.status)} • ${new Date(x.created_at).toLocaleDateString('ar-LB')}</small></span>
+        <div class="row-actions">
+          ${x.status==='pending'?`
+            <button class="primary compact" data-payout-paid="${x.id}" data-agent-id="${id}">تسجيل مدفوع</button>
+            <button class="secondary compact" data-payout-cancel="${x.id}" data-agent-id="${id}">إلغاء الدفعة</button>
+          `:''}
+        </div>
+      </div>`).join('')||'<div class="empty">لا توجد دفعات بعد.</div>'}
     </div>
 
     <h3>آخر الطلبات</h3>
