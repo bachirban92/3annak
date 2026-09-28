@@ -151,11 +151,12 @@ async function customerPortal(){
   for(const r of reqRows){
     if(!r.completed_at)missingByOrder[r.order_id]=(missingByOrder[r.order_id]||0)+1;
   }
-  const actionCount=current.filter(o=>(missingByOrder[o.id]||0)>0).length;
+  const actionCount=current.filter(o=>(missingByOrder[o.id]||0)>0||o.customer_submission_ready===false).length;
 
   const orderState=o=>{
     const missing=missingByOrder[o.id]||0;
     if(missing)return {kind:'action',title:'مطلوب منك',text:`أكمل ${missing} عنصر مطلوب`};
+    if(o.customer_submission_ready===false)return {kind:'action',title:'مطلوب منك',text:'أرسل الطلب للوكلاء بعد مراجعة البيانات'};
     if(o.refund_pending)return {kind:'waiting',title:'قيد المعالجة',text:'رد المبلغ قيد المعالجة'};
     if(o.status==='submitted'&&!o.assigned_agent_id)return {kind:'waiting',title:'بانتظار وكيل',text:'سنظهر الطلب للوكلاء المؤهلين'};
     if(o.assigned_agent_id&&o.status==='accepted')return {kind:'ok',title:'تم تعيين وكيل',text:'سيبدأ تنفيذ الطلب'};
@@ -184,8 +185,8 @@ async function customerPortal(){
     ${actionCount?`<section class="dashboard-panel attention-panel">
       <div class="dashboard-panel-head"><h3>مطلوب منك</h3></div>
       <div class="stack">
-        ${current.filter(o=>(missingByOrder[o.id]||0)>0).map(o=>`<button class="action-row" data-order="${o.id}">
-          <span><b>${o.public_code}</b><small>أكمل ${missingByOrder[o.id]} عنصر مطلوب لإرسال الطلب للوكلاء</small></span>
+        ${current.filter(o=>(missingByOrder[o.id]||0)>0||o.customer_submission_ready===false).map(o=>`<button class="action-row" data-order="${o.id}">
+          <span><b>${o.public_code}</b><small>${(missingByOrder[o.id]||0)>0?`أكمل ${missingByOrder[o.id]} عنصر مطلوب`:'راجع البيانات وأرسل الطلب للوكلاء'}</small></span>
           <strong>فتح</strong>
         </button>`).join('')}
       </div>
@@ -528,6 +529,8 @@ async function customerDetail(id){
 
   const customerAction=incompleteRequired.length
     ?{kind:'action',title:'مطلوب منك الآن',text:`أكمل ${incompleteRequired.length} عنصر مطلوب ليتم إرسال الطلب للوكلاء.`}
+    :o.customer_submission_ready===false
+      ?{kind:'action',title:'الطلب جاهز للإرسال',text:'راجع البيانات ثم أرسل الطلب للوكلاء.'}
     :o.refund_pending
       ?{kind:'waiting',title:'رد المبلغ قيد المعالجة',text:'لا يلزمك أي إجراء حالياً.'}
       :o.status==='submitted'&&!o.assigned_agent_id
@@ -574,6 +577,10 @@ async function customerDetail(id){
       <span class="completecheck">!</span>
       <div><b>أكمل المعلومات المطلوبة</b><small>باقي ${incompleteRequired.length} عنصر مطلوب قبل إرسال الطلب للوكلاء.</small></div>
     </div>`:''}
+
+    ${!incompleteRequired.length&&o.status==='submitted'&&!o.assigned_agent_id&&o.customer_submission_ready===false
+      ?`<button class="primary full" data-finalize-order="${o.id}">إرسال الطلب للوكلاء</button>`
+      :''}
 
     ${finalDocs.length?`<section class="dashboard-panel">
       <div class="dashboard-panel-head"><h3>المستندات</h3><small>${finalDocs.length}</small></div>
@@ -2032,6 +2039,13 @@ function bind(){
       }
     }
 
+    const finalized=await supabase.rpc('finalize_order_submission',{p_order_id:orderId});
+    if(finalized.error){
+      busy(b,false);
+      toast(finalized.error.message==='requirements_incomplete'?'تم إنشاء الطلب، أكمل المعلومات المطلوبة ثم أرسله للوكلاء':finalized.error.message,true);
+      return customerDetail(orderId);
+    }
+
     busy(b,false);
     toast('تم تأكيد الطلب');
     customerDetail(orderId);
@@ -2263,6 +2277,18 @@ function bind(){
     busy(x,false);
     if(error)return toast(error.message,true);
     window.location.href=data.signedUrl;
+  });
+
+  document.querySelectorAll('[data-finalize-order]').forEach(x=>x.onclick=async()=>{
+    busy(x,true,'جارٍ الإرسال...');
+    const {error}=await supabase.rpc('finalize_order_submission',{p_order_id:x.dataset.finalizeOrder});
+    busy(x,false);
+    if(error){
+      const msg=error.message==='requirements_incomplete'?'أكمل المعلومات المطلوبة أولاً':error.message;
+      return toast(msg,true);
+    }
+    toast('تم إرسال الطلب للوكلاء');
+    customerDetail(x.dataset.finalizeOrder);
   });
 
   document.querySelectorAll('[data-cancel]').forEach(x=>x.onclick=async()=>{
