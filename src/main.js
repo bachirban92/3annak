@@ -546,10 +546,12 @@ async function customerDetail(id){
   const incompleteRequired=(reqs||[]).filter(r=>r.required&&!r.completed_at);
   const finalDocs=(d||[]).filter(x=>x.kind==='final_document');
   const payment=payments?.[0];
+  const paymentMethodLabel=payment?.provider==='cash'?'نقداً':payment?.provider==='whish'?'Whish Pay':payment?.provider||'';
   const paymentLabel=o.refund_pending?'رد المبلغ قيد المعالجة':
-    payment?.status==='paid'?'مدفوع نقداً':
+    payment?.status==='paid'?`مدفوع${paymentMethodLabel?' • '+paymentMethodLabel:''}`:
     payment?.status==='refunded'?'تم رد المبلغ':
-    payment?.status==='failed'?'فشل الدفع':'بانتظار الدفع';
+    payment?.status==='failed'?'فشل الدفع':
+    o.assigned_agent_id?'الدفع مستحق الآن':'الدفع غير مستحق بعد';
 
   const customerAction=incompleteRequired.length
     ?{kind:'action',title:'مطلوب منك الآن',text:`أكمل ${incompleteRequired.length} عنصر مطلوب ليتم إرسال الطلب للوكلاء.`}
@@ -559,8 +561,10 @@ async function customerDetail(id){
       ?{kind:'waiting',title:'رد المبلغ قيد المعالجة',text:'لا يلزمك أي إجراء حالياً.'}
       :o.status==='submitted'&&!o.assigned_agent_id
         ?{kind:'waiting',title:'بانتظار قبول وكيل',text:'طلبك جاهز ويظهر للوكلاء المؤهلين.'}
-        :o.status==='accepted'
-          ?{kind:'ok',title:'تم تعيين وكيل',text:'الوكيل استلم الطلب وسيبدأ التنفيذ.'}
+        :o.status==='accepted'&&payment?.status!=='paid'
+          ?{kind:'action',title:'الدفع مطلوب الآن',text:'تم قبول طلبك من وكيل. أكمل الدفع ليبدأ التنفيذ.'}
+          :o.status==='accepted'
+            ?{kind:'ok',title:'تم تعيين وكيل',text:'تم تأكيد الدفع ويمكن للوكيل بدء التنفيذ.'}
           :o.status==='completed'
             ?{kind:'ok',title:'اكتمل الطلب',text:finalDocs.length?'مستنداتك النهائية جاهزة للعرض والتنزيل.':'تم إكمال الطلب.'}
             :o.status==='cancelled'
@@ -593,7 +597,7 @@ async function customerDetail(id){
     </section>
 
     ${payment?`<div class="paymentbox">
-      <div><small>الدفع</small><b>${paymentLabel}</b>${payment?.status==='paid'?'<small>طريقة الدفع: نقداً</small>':''}</div>
+      <div><small>الدفع</small><b>${paymentLabel}</b>${payment?.status==='paid'&&paymentMethodLabel?`<small>طريقة الدفع: ${esc(paymentMethodLabel)}</small>`:''}${payment?.status==='pending'&&!o.assigned_agent_id?'<small>لن يُطلب منك الدفع قبل قبول وكيل.</small>':''}</div>
       <strong>${money(payment?.amount??o.total_amount)}</strong>
     </div>`:''}
 
@@ -908,18 +912,21 @@ async function agentPortal(){
 }
 async function agentJob(id){
   clearLive();
-  const [{data:rows,error},{data:events},{data:docs},{data:deliverables},{data:workflow},{data:requirements},{data:deliveryOrder},{data:feedback}]=await Promise.all([
+  const [{data:rows,error},{data:events},{data:docs},{data:deliverables},{data:workflow},{data:requirements},{data:deliveryOrder},{data:feedback},{data:payments}]=await Promise.all([
     supabase.rpc('get_agent_job',{p_order_id:id}),
     supabase.from('order_events').select('*').eq('order_id',id).order('created_at'),
     supabase.from('documents').select('*').eq('order_id',id).order('created_at'),
     supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order'),
     supabase.from('order_workflow_steps').select('*').eq('order_id',id).order('sort_order'),
     supabase.from('order_requirements').select('*').eq('order_id',id).order('created_at'),
-    supabase.from('orders').select('delivery_mode,delivery_address_line1,delivery_address_line2,delivery_city,delivery_region,delivery_postal_code,delivery_country,delivery_fee,delivery_agent_payout,hard_copy_delivered_at').eq('id',id).single(),
-    supabase.rpc('get_order_feedback',{p_order_id:id})
+    supabase.from('orders').select('delivery_mode,delivery_address_line1,delivery_address_line2,delivery_city,delivery_region,delivery_postal_code,delivery_country,delivery_fee,delivery_agent_payout,hard_copy_delivered_at,total_amount').eq('id',id).single(),
+    supabase.rpc('get_order_feedback',{p_order_id:id}),
+    supabase.from('payments').select('status,provider,amount,paid_at').eq('order_id',id).order('created_at',{ascending:false}).limit(1)
   ]);
   const o=rows?.[0];
   if(error||!o)return toast(error?.message||'تعذر فتح الطلب',true);
+  const payment=payments?.[0];
+  const paymentRequired=paymentsEnabled&&Number(deliveryOrder?.total_amount||0)>0&&payment?.status!=='paid';
   const pendingStep=(workflow||[]).find(x=>!x.completed_at);
   const next=o.status==='completed'||o.status==='cancelled'
     ?null
@@ -931,8 +938,10 @@ async function agentJob(id){
   const docById=Object.fromEntries((docs||[]).map(x=>[x.id,x]));
   const missingDeliverables=(deliverables||[]).filter(x=>!docByDeliverable[x.id]);
   const hardCopyPending=deliveryOrder?.delivery_mode==='hard_copy'&&!deliveryOrder?.hard_copy_delivered_at;
-  const agentAction=!next
-    ?{kind:'ok',title:'تم إكمال الطلب',text:'لا يوجد إجراء مطلوب.'}
+  const agentAction=paymentRequired
+    ?{kind:'waiting',title:'بانتظار دفع العميل',text:'تم قبول الطلب. لا تبدأ التنفيذ قبل تأكيد الدفع.'}
+    :!next
+      ?{kind:'ok',title:'تم إكمال الطلب',text:'لا يوجد إجراء مطلوب.'}
     :next[0]==='completed'&&missingDeliverables.length
       ?{kind:'action',title:'مطلوب منك الآن',text:`ارفع ${missingDeliverables.length} مستند نهائي قبل إكمال الطلب.`}
       :next[0]==='completed'&&hardCopyPending
@@ -949,6 +958,7 @@ async function agentJob(id){
     </div>
 
     <div class="jobinfo">
+      <div><small>الدفع</small><b>${payment?.status==='paid'?'تم الدفع':'بانتظار العميل'}</b></div>
       <div><small>الخدمة</small><b>${esc(o.service_names)}</b></div>
       <div><small>العقار</small><b>${esc(o.cadastral_area)} • ${esc(o.property_number)}</b></div>
       <div><small>بدلك</small><b>${money(o.agent_payout)}</b>${deliveryOrder?.delivery_agent_payout>0?`<small>يشمل ${money(deliveryOrder.delivery_agent_payout)} توصيل</small>`:''}</div>
@@ -965,7 +975,7 @@ async function agentJob(id){
         <b>${deliveryOrder.hard_copy_delivered_at?'تم التوصيل':'مطلوب التوصيل'}</b>
         <span>${esc([deliveryOrder.delivery_address_line1,deliveryOrder.delivery_address_line2,deliveryOrder.delivery_city,deliveryOrder.delivery_region,deliveryOrder.delivery_country].filter(Boolean).join(' • '))}</span>
       </div>
-      ${deliveryOrder.hard_copy_delivered_at?'<span class="verifiedmark">✓</span>':`<button class="primary compact" data-confirm-hard-copy="${o.id}">تأكيد التوصيل</button>`}
+      ${deliveryOrder.hard_copy_delivered_at?'<span class="verifiedmark">✓</span>':`<button class="primary compact" data-confirm-hard-copy="${o.id}" ${paymentRequired?'disabled':''}>تأكيد التوصيل</button>`}
     </section>`:''}
 
     ${(requirements||[]).length?`<h3>معلومات العميل</h3>
@@ -986,8 +996,8 @@ async function agentJob(id){
             <div class="deliverylabel"><span class="deliverystatus">${d?'✓':'○'}</span><span><b>${esc(x.service_name_ar)}</b><small>${d?'تم رفع المستند النهائي':'بانتظار المستند النهائي'}</small></span></div>
             <div class="deliveryactions">
               ${d?`<button class="secondary compact" data-file-view="${esc(d.storage_path)}" data-file-name="${esc(d.original_name||'مستند')}" data-file-mime="${esc(d.mime_type||'')}">عرض</button>`:''}
-              <input id="deliverable-file-${x.id}" type="file" accept=".pdf,image/jpeg,image/png,image/webp">
-              <button class="secondary compact" data-deliverable-upload="${x.id}" data-order-id="${o.id}" data-old-path="${esc(d?.storage_path||'')}">${d?'استبدال':'رفع'}</button>
+              <input id="deliverable-file-${x.id}" type="file" accept=".pdf,image/jpeg,image/png,image/webp" ${paymentRequired?'disabled':''}>
+              <button class="secondary compact" data-deliverable-upload="${x.id}" data-order-id="${o.id}" data-old-path="${esc(d?.storage_path||'')}" ${paymentRequired?'disabled':''}>${d?'استبدال':'رفع'}</button>
             </div>
           </div>`;
         }).join('')}
@@ -1019,7 +1029,7 @@ async function agentJob(id){
 
     ${next?`
       ${next[0]==='completed'&&missingDeliverables.length?`<div class="completebox requirementgate"><span class="completecheck">!</span><div><b>أكمل المستندات النهائية</b><small>باقي ${missingDeliverables.length} مستند قبل إكمال الطلب.</small></div></div>`:''}
-      <button class="primary full next-action" data-status="${next[0]}" data-id="${o.id}" ${next[0]==='completed'&&(missingDeliverables.length||hardCopyPending)?'disabled':''}>${next[1]}</button>
+      <button class="primary full next-action" data-status="${next[0]}" data-id="${o.id}" ${paymentRequired||next[0]==='completed'&&(missingDeliverables.length||hardCopyPending)?'disabled':''}>${paymentRequired?'بانتظار الدفع':next[1]}</button>
     `:'<div class="donebox">تم إكمال الطلب</div>'}
   </section>`);
   bind();
@@ -1494,7 +1504,7 @@ async function adminOrder(id){
       <div class="adminrow paymentadmin">
         <span><b>${paymentLabel}</b><small>${payment?.provider_reference?esc(payment.provider_reference):''}</small></span>
         <div class="paymentactions">
-          ${payment&&['pending','failed'].includes(payment.status)?`<button class="secondary compact" data-mark-payment-paid="${payment.id}" data-order-id="${o.id}">تسجيل دفعة نقدية</button>`:''}
+          ${payment&&o.assigned_agent_id&&['pending','failed'].includes(payment.status)?`<button class="secondary compact" data-mark-payment-paid="${payment.id}" data-order-id="${o.id}">تسجيل دفعة نقدية</button>`:''}
           ${payment&&payment.status==='paid'&&o.status==='cancelled'?`<button class="secondary compact" data-mark-payment-refunded="${payment.id}" data-order-id="${o.id}">تسجيل رد المبلغ</button>`:''}
         </div>
       </div>
