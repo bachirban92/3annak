@@ -1054,9 +1054,12 @@ async function admin(section='overview'){
   const incompleteOrderIds=new Set((incompleteReqs||[]).map(x=>x.order_id));
   const refundOrders=(o||[]).filter(x=>x.refund_pending);
   const readyUnassigned=(o||[]).filter(x=>
-    x.status==='submitted'&&!x.assigned_agent_id&&!incompleteOrderIds.has(x.id)
+    x.status==='submitted'&&!x.assigned_agent_id&&x.customer_submission_ready!==false&&!incompleteOrderIds.has(x.id)
   );
-  const waitingCustomer=(o||[]).filter(x=>incompleteOrderIds.has(x.id)&&!['completed','cancelled'].includes(x.status));
+  const waitingCustomer=(o||[]).filter(x=>
+    !['completed','cancelled'].includes(x.status)
+    && (incompleteOrderIds.has(x.id)||x.customer_submission_ready===false)
+  );
   const failedPaymentOrders=new Set((failedPayments||[]).map(x=>x.order_id));
   const adminAttention=pendingAgents+openSupport+refundOrders.length+readyUnassigned.length+(paymentsEnabled?failedPaymentOrders.size:0);
 
