@@ -1306,25 +1306,43 @@ async function adminAgent(id){
 async function adminOrder(id){
   clearLive();
   if(profile?.role!=='admin')return go('home');
-  const [{data:pack,error},{data:agents},{data:payments},{data:workflowSteps},{data:deliverables}]=await Promise.all([
+
+  const [
+    {data:pack,error},
+    {data:agents},
+    {data:payments},
+    {data:workflowSteps},
+    {data:deliverables},
+    {data:disputes},
+    {data:assignmentHistory}
+  ]=await Promise.all([
     supabase.rpc('admin_get_order',{p_order_id:id}),
-    supabase.from('agent_profiles').select('user_id,verification_status').eq('verification_status','approved'),
+    supabase.from('agent_profiles').select('user_id,verification_status,available').eq('verification_status','approved'),
     supabase.from('payments').select('*').eq('order_id',id).order('created_at',{ascending:false}).limit(1),
     supabase.from('order_workflow_steps').select('*').eq('order_id',id).order('sort_order'),
-    supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order')
+    supabase.from('order_deliverables').select('*').eq('order_id',id).order('sort_order'),
+    supabase.from('disputes').select('*').eq('order_id',id).order('created_at',{ascending:false}),
+    supabase.from('order_assignment_history').select('*').eq('order_id',id).order('created_at',{ascending:false})
   ]);
   if(error||!pack)return toast(error?.message||'تعذر فتح الطلب',true);
 
-  const agentIds=(agents||[]).map(x=>x.user_id),agentNames={};
-  if(agentIds.length){
-    const {data:p}=await supabase.from('profiles').select('id,full_name,email,phone').in('id',agentIds);
+  const o=pack.order,items=pack.items||[],events=pack.events||[],docs=pack.documents||[],reqs=pack.requirements||[];
+  const allAgentIds=[...new Set([...(agents||[]).map(x=>x.user_id),o.assigned_agent_id,...(assignmentHistory||[]).flatMap(x=>[x.from_agent_id,x.to_agent_id])].filter(Boolean))];
+  const agentNames={};
+  if(allAgentIds.length){
+    const {data:p}=await supabase.from('profiles').select('id,full_name,email,phone').in('id',allAgentIds);
     (p||[]).forEach(x=>agentNames[x.id]=x);
   }
-  const o=pack.order,items=pack.items||[],events=pack.events||[],docs=pack.documents||[],reqs=pack.requirements||[];
+
   const payment=payments?.[0];
   const docsById=Object.fromEntries(docs.map(d=>[d.id,d]));
   const finalByDeliverable=Object.fromEntries(docs.filter(d=>d.kind==='final_document'&&d.deliverable_id).map(d=>[d.deliverable_id,d]));
   const incompleteRequired=reqs.filter(r=>r.required&&!r.completed_at);
+  const missingDeliverables=(deliverables||[]).filter(x=>!finalByDeliverable[x.id]);
+  const currentWorkflow=(workflowSteps||[]).find(x=>!x.completed_at);
+  const openSupport=(disputes||[]).find(x=>['open','reviewing'].includes(x.status));
+  const currentAgent=agentNames[o.assigned_agent_id];
+
   const canAssign=!['completed','cancelled'].includes(o.status)
     && o.customer_submission_ready!==false
     && incompleteRequired.length===0;
@@ -1341,90 +1359,208 @@ async function adminOrder(id){
       .map(x=>x.agent_id));
     eligibleAgents=eligibleAgents.filter(a=>eligibleIds.has(a.user_id));
   }
-  app.innerHTML=shell(`<section class="card">
-    <div class="title"><h2>${esc(o.public_code)}</h2><button data-go="admin">رجوع</button></div>
-    <div class="jobinfo">
-      <div><small>العميل</small><b>${esc(o.customer_name||'—')}</b></div>
-      <div><small>الهاتف</small><b>${esc(o.customer_phone||'—')}</b></div>
-      <div><small>العقار</small><b>${esc(o.cadastral_area)} • ${esc(o.property_number)}</b></div>
-      <div><small>الخدمة</small><b>${items.map(x=>esc(x.service_name_ar)).join('، ')}</b></div>
-      <div><small>الإجمالي</small><b>${money(o.total_amount)}</b></div>
-      <div><small>الحالة</small><b>${labels[o.status]||o.status}</b></div>
+
+  const paymentLabel=o.refund_pending?'رد المبلغ قيد المعالجة':
+    payment?.status==='paid'?'مدفوع':
+    payment?.status==='refunded'?'تم رد المبلغ':
+    payment?.status==='failed'?'فشل الدفع':'بانتظار الدفع';
+
+  const adminWarnings=[];
+  if(incompleteRequired.length)adminWarnings.push(`العميل لم يكمل ${incompleteRequired.length} متطلب مطلوب`);
+  if(o.customer_submission_ready===false&&!incompleteRequired.length)adminWarnings.push('العميل لم يرسل الطلب للوكلاء بعد');
+  if(o.customer_submission_ready!==false&&!o.assigned_agent_id&&o.status==='submitted'&&!incompleteRequired.length)adminWarnings.push(
+    eligibleAgents.length?'الطلب جاهز ولم يقبله أي وكيل بعد':'لا يوجد وكيل مؤهل في هذه المحافظة'
+  );
+  if(openSupport)adminWarnings.push('يوجد طلب دعم مفتوح');
+  if(o.refund_pending)adminWarnings.push('رد المبلغ يحتاج متابعة');
+  if(paymentsEnabled&&payment?.status==='failed')adminWarnings.push('فشل الدفع');
+  if(o.status==='collected'&&missingDeliverables.length)adminWarnings.push(`ناقص ${missingDeliverables.length} مستند نهائي قبل الإكمال`);
+
+  const nextAdminState=adminWarnings.length
+    ?{kind:'action',title:'بحاجة لمتابعة',text:adminWarnings[0]}
+    :o.status==='completed'
+      ?{kind:'ok',title:'الطلب مكتمل',text:'لا يوجد إجراء تشغيلي مطلوب.'}
+      :o.status==='cancelled'
+        ?{kind:'waiting',title:'الطلب ملغى',text:o.refund_pending?'رد المبلغ ما زال قيد المعالجة.':'لا يوجد إجراء مطلوب.'}
+        :currentWorkflow
+          ?{kind:'waiting',title:'قيد التنفيذ',text:`الخطوة التالية للوكيل: ${currentWorkflow.label_ar}`}
+          :{kind:'waiting',title:labels[o.status]||o.status,text:'لا يوجد تدخل إداري مطلوب حالياً.'};
+
+  const propertyBits=[
+    o.governorate,
+    o.district,
+    o.cadastral_area,
+    o.property_number?`عقار ${o.property_number}`:'',
+    o.property_section?`قسم/حصة ${o.property_section}`:''
+  ].filter(Boolean).map(esc).join(' • ');
+
+  app.innerHTML=shell(`<section class="admin-order-workspace">
+    <div class="title">
+      <div><small>إدارة الطلب</small><h2>${esc(o.public_code)}</h2></div>
+      <button data-go="admin/orders">رجوع</button>
     </div>
 
-    <h3>الدفع</h3>
-    <div class="adminrow paymentadmin">
-      <span>
-        <b>${money(payment?.amount??o.total_amount)}</b>
-        <small>${o.refund_pending?'رد المبلغ قيد المعالجة':payment?.status==='paid'?'مدفوع':payment?.status==='refunded'?'تم رد المبلغ':payment?.status==='failed'?'فشل الدفع':'بانتظار الدفع'}</small>
-      </span>
-      <div class="paymentactions">
-        ${payment&&['pending','failed'].includes(payment.status)?`<button class="secondary compact" data-mark-payment-paid="${payment.id}" data-order-id="${o.id}">تسجيل مدفوع</button>`:''}
-        ${payment&&payment.status==='paid'&&o.status==='cancelled'?`<button class="secondary compact" data-mark-payment-refunded="${payment.id}" data-order-id="${o.id}">تسجيل رد المبلغ</button>`:''}
+    <div class="next-step-card ${nextAdminState.kind}">
+      <small>الوضع التشغيلي</small>
+      <b>${esc(nextAdminState.title)}</b>
+      <span>${esc(nextAdminState.text)}</span>
+    </div>
+
+    ${adminWarnings.length?`<section class="dashboard-panel attention-panel">
+      <div class="dashboard-panel-head"><h3>تنبيهات</h3><small>${adminWarnings.length}</small></div>
+      <div class="admin-warning-list">
+        ${adminWarnings.map(x=>`<div>• ${esc(x)}</div>`).join('')}
       </div>
-    </div>
+    </section>`:''}
 
-    <h3>إدارة الطلب</h3>
-    <div class="info-box">
-      <b>${labels[o.status]||o.status}</b>
-      <small>حالة الطلب تتغير من خلال مسار التنفيذ، وليس يدوياً.</small>
-    </div>
-
-    <form id="adminStatusForm">
-      <input type="hidden" name="status" value="${o.status}">
-      <input name="note" required minlength="2" placeholder="إضافة ملاحظة على الطلب">
-      <button class="secondary full">إضافة الملاحظة</button>
-    </form>
-
-    ${!['completed','cancelled'].includes(o.status)?`
-      ${!canAssign?`<div class="info-box"><b>بانتظار العميل</b><small>${incompleteRequired.length?'هناك متطلبات مطلوبة غير مكتملة.':'لم يتم إرسال الطلب للوكلاء بعد.'}</small></div>`:''}
-      <form id="adminAssignForm">
-        <select name="agent" required ${canAssign?'':'disabled'}>
-          <option value="">${o.assigned_agent_id?'اختر وكيلاً لإعادة التعيين':'اختر وكيلاً للتعيين'}</option>
-          ${eligibleAgents.filter(a=>a.user_id!==o.assigned_agent_id).map(a=>`<option value="${a.user_id}">${esc(agentNames[a.user_id]?.full_name||agentNames[a.user_id]?.email||a.user_id)}</option>`).join('')}
-        </select>
-        <input name="reason" ${o.assigned_agent_id?'required':''} ${canAssign?'':'disabled'} placeholder="${o.assigned_agent_id?'سبب إعادة التعيين':'سبب التعيين (اختياري)'}">
-        <button class="secondary full" ${canAssign&&eligibleAgents.filter(a=>a.user_id!==o.assigned_agent_id).length?'':'disabled'}>${o.assigned_agent_id?'إعادة تعيين الوكيل':'تعيين الوكيل'}</button>
-      </form>`:''}
-
-    ${!['completed','cancelled'].includes(o.status)?`<button class="danger full" data-admin-cancel="${o.id}">إلغاء الطلب</button>`:''}
-
-    <h3>المتطلبات</h3>
-    <div class="stack">${reqs.length?reqs.map(r=>{
-      const d=r.document_id?docsById[r.document_id]:null;
-      return `<div class="adminrow">
-        <span><b>${esc(r.label_ar)}</b><small>${r.value_text?esc(r.value_text):(d?esc(d.original_name||'مرفق'):(r.required?'مطلوب وغير مكتمل':'اختياري'))}</small></span>
-        <div class="row-actions">
-          ${d?`<button class="secondary compact" data-file-view="${esc(d.storage_path)}" data-file-name="${esc(d.original_name||'مستند')}" data-file-mime="${esc(d.mime_type||'')}">عرض</button>`:''}
-          <i>${r.completed_at?'مكتمل':'ناقص'}</i>
+    <div class="admin-order-grid">
+      <section class="dashboard-panel">
+        <h3>العميل</h3>
+        <div class="order-core-grid">
+          <div><small>الاسم</small><b>${esc(o.customer_name||'—')}</b></div>
+          <div><small>الهاتف</small><a href="tel:${esc(o.customer_phone||'')}">${esc(o.customer_phone||'—')}</a></div>
+          <div><small>البريد</small><b>${esc(o.customer_email||'—')}</b></div>
         </div>
-      </div>`;
-    }).join(''):'<div class="empty">لا توجد متطلبات.</div>'}</div>
+      </section>
 
-    <h3>التنفيذ</h3>
-    <div class="workflowchecklist">
-      ${(workflowSteps||[]).map((x,idx)=>`<div class="workflowstep ${x.completed_at?'done':(!x.completed_at&&(workflowSteps||[]).findIndex(w=>!w.completed_at)===idx?'current':'')}">
-        <span>${x.completed_at?'✓':(!x.completed_at&&(workflowSteps||[]).findIndex(w=>!w.completed_at)===idx?'•':'○')}</span>
-        <b>${esc(x.label_ar)}</b>
-      </div>`).join('')||'<div class="empty">لا توجد مراحل تنفيذ.</div>'}
+      <section class="dashboard-panel">
+        <h3>العقار</h3>
+        <div class="order-core-grid">
+          <div class="wide"><small>التفاصيل</small><b>${propertyBits||'—'}</b></div>
+          ${o.notes?`<div class="wide"><small>ملاحظة العميل</small><b>${esc(o.notes)}</b></div>`:''}
+        </div>
+      </section>
+
+      <section class="dashboard-panel">
+        <h3>الخدمة والمبلغ</h3>
+        <div class="order-core-grid">
+          <div class="wide"><small>الخدمات</small><b>${items.map(x=>esc(x.service_name_ar)).join('، ')||'—'}</b></div>
+          <div><small>سعر الخدمات</small><b>${money(o.services_total)}</b></div>
+          <div><small>رسوم رسمية</small><b>${money(o.official_fees)}</b></div>
+          ${Number(o.delivery_fee||0)>0?`<div><small>التوصيل</small><b>${money(o.delivery_fee)}</b></div>`:''}
+          <div><small>الإجمالي</small><b>${money(o.total_amount)}</b></div>
+        </div>
+      </section>
+
+      <section class="dashboard-panel">
+        <h3>الوكيل</h3>
+        ${o.assigned_agent_id?`<div class="agent-assigned-card">
+          <div><b>${esc(currentAgent?.full_name||currentAgent?.email||o.assigned_agent_id)}</b><small>${esc(currentAgent?.phone||'')}</small></div>
+          <button class="secondary compact" data-admin-agent="${o.assigned_agent_id}">فتح حساب الوكيل</button>
+        </div>`:'<div class="empty">لم يتم تعيين وكيل بعد.</div>'}
+      </section>
     </div>
 
-    <h3>المستندات المطلوبة</h3>
-    <div class="deliverychecklist">
-      ${(deliverables||[]).map(x=>{
-        const d=finalByDeliverable[x.id];
-        return `<div class="deliveryitem ${d?'done':''}">
-          <div class="deliverylabel"><span class="deliverystatus">${d?'✓':'○'}</span><span><b>${esc(x.service_name_ar)}</b><small>${d?'تم رفع المستند النهائي':'بانتظار المستند النهائي'}</small></span></div>
-          ${d?`<button class="secondary compact" data-file-view="${esc(d.storage_path)}" data-file-name="${esc(d.original_name||'مستند')}" data-file-mime="${esc(d.mime_type||'')}">عرض</button>`:''}
+    <section class="dashboard-panel">
+      <div class="dashboard-panel-head"><h3>الدفع</h3><b>${money(payment?.amount??o.total_amount)}</b></div>
+      <div class="adminrow paymentadmin">
+        <span><b>${paymentLabel}</b><small>${payment?.provider_reference?esc(payment.provider_reference):''}</small></span>
+        <div class="paymentactions">
+          ${payment&&['pending','failed'].includes(payment.status)?`<button class="secondary compact" data-mark-payment-paid="${payment.id}" data-order-id="${o.id}">تسجيل مدفوع</button>`:''}
+          ${payment&&payment.status==='paid'&&o.status==='cancelled'?`<button class="secondary compact" data-mark-payment-refunded="${payment.id}" data-order-id="${o.id}">تسجيل رد المبلغ</button>`:''}
+        </div>
+      </div>
+    </section>
+
+    ${openSupport?`<section class="dashboard-panel attention-panel">
+      <div class="dashboard-panel-head"><h3>الدعم</h3><button class="secondary compact" data-admin-dispute="${openSupport.id}">فتح الحالة</button></div>
+      <div class="feedbackdone">
+        <b>${openSupport.status==='reviewing'?'قيد المراجعة':'طلب دعم مفتوح'}</b>
+        <small>${esc(openSupport.reason)}</small>
+      </div>
+    </section>`:''}
+
+    <section class="dashboard-panel">
+      <div class="dashboard-panel-head"><h3>المتطلبات</h3><small>${reqs.length-incompleteRequired.length}/${reqs.length}</small></div>
+      <div class="stack">${reqs.length?reqs.map(r=>{
+        const d=r.document_id?docsById[r.document_id]:null;
+        return `<div class="adminrow">
+          <span><b>${esc(r.label_ar)}</b><small>${r.value_text?esc(r.value_text):(d?esc(d.original_name||'مرفق'):(r.required?'مطلوب وغير مكتمل':'اختياري'))}</small></span>
+          <div class="row-actions">
+            ${d?`<button class="secondary compact" data-file-view="${esc(d.storage_path)}" data-file-name="${esc(d.original_name||'مستند')}" data-file-mime="${esc(d.mime_type||'')}">عرض</button>
+            <button class="secondary compact" data-file-download="${esc(d.storage_path)}">تنزيل</button>`:''}
+            <i>${r.completed_at?'مكتمل':'ناقص'}</i>
+          </div>
         </div>`;
-      }).join('')||'<div class="empty">لا توجد مستندات مطلوبة.</div>'}
-    </div>
+      }).join(''):'<div class="empty">لا توجد متطلبات.</div>'}</div>
+    </section>
 
-    <h3>الملفات</h3>
-    <div class="stack">${docs.length?docs.map(d=>`<div class="adminrow"><span><b>${esc(d.original_name||'ملف')}</b><small>${esc(d.kind)}</small></span><button class="secondary compact" data-file-view="${esc(d.storage_path)}" data-file-name="${esc(d.original_name||'مستند')}" data-file-mime="${esc(d.mime_type||'')}">عرض</button></div>`).join(''):'<div class="empty">لا توجد ملفات.</div>'}</div>
+    <section class="dashboard-panel">
+      <div class="dashboard-panel-head"><h3>التنفيذ</h3><small>${(workflowSteps||[]).filter(x=>x.completed_at).length}/${(workflowSteps||[]).length}</small></div>
+      <div class="workflowchecklist">
+        ${(workflowSteps||[]).map((x,idx)=>`<div class="workflowstep ${x.completed_at?'done':(!x.completed_at&&(workflowSteps||[]).findIndex(w=>!w.completed_at)===idx?'current':'')}">
+          <span>${x.completed_at?'✓':(!x.completed_at&&(workflowSteps||[]).findIndex(w=>!w.completed_at)===idx?'•':'○')}</span>
+          <div><b>${esc(x.label_ar)}</b>${x.completed_at?`<small>${new Date(x.completed_at).toLocaleString('ar-LB')}</small>`:''}</div>
+        </div>`).join('')||'<div class="empty">لا توجد مراحل تنفيذ.</div>'}
+      </div>
+    </section>
 
-    <h3>التتبّع</h3>
-    <div class="timeline">${events.map(e=>`<div><b>${esc(e.label_ar)}</b><small>${new Date(e.created_at).toLocaleString('ar-LB')}</small></div>`).join('')}</div>
+    <section class="dashboard-panel">
+      <div class="dashboard-panel-head"><h3>المستندات النهائية</h3><small>${(deliverables||[]).length-missingDeliverables.length}/${(deliverables||[]).length}</small></div>
+      <div class="deliverychecklist">
+        ${(deliverables||[]).map(x=>{
+          const d=finalByDeliverable[x.id];
+          return `<div class="deliveryitem ${d?'done':''}">
+            <div class="deliverylabel"><span class="deliverystatus">${d?'✓':'○'}</span><span><b>${esc(x.service_name_ar)}</b><small>${d?esc(d.original_name||'تم رفع المستند النهائي'):'بانتظار المستند النهائي'}</small></span></div>
+            ${d?`<div class="row-actions">
+              <button class="secondary compact" data-file-view="${esc(d.storage_path)}" data-file-name="${esc(d.original_name||'مستند')}" data-file-mime="${esc(d.mime_type||'')}">عرض</button>
+              <button class="secondary compact" data-file-download="${esc(d.storage_path)}">تنزيل</button>
+            </div>`:''}
+          </div>`;
+        }).join('')||'<div class="empty">لا توجد مستندات مطلوبة.</div>'}
+      </div>
+    </section>
+
+    ${docs.length?`<details class="order-section">
+      <summary>كل ملفات الطلب (${docs.length})</summary>
+      <div class="order-section-body stack">
+        ${docs.map(d=>`<div class="adminrow">
+          <span><b>${esc(d.original_name||'ملف')}</b><small>${d.kind==='customer_attachment'?'مرفق العميل':d.kind==='final_document'?'مستند نهائي':esc(d.kind)}</small></span>
+          <div class="row-actions">
+            <button class="secondary compact" data-file-view="${esc(d.storage_path)}" data-file-name="${esc(d.original_name||'مستند')}" data-file-mime="${esc(d.mime_type||'')}">عرض</button>
+            <button class="secondary compact" data-file-download="${esc(d.storage_path)}">تنزيل</button>
+          </div>
+        </div>`).join('')}
+      </div>
+    </details>`:''}
+
+    <details class="order-section" open>
+      <summary>إدارة الطلب</summary>
+      <div class="order-section-body admin-order-controls">
+        <form id="adminStatusForm">
+          <input type="hidden" name="status" value="${o.status}">
+          <input name="note" required minlength="2" placeholder="إضافة ملاحظة على الطلب">
+          <button class="secondary full">إضافة الملاحظة</button>
+        </form>
+
+        ${!['completed','cancelled'].includes(o.status)?`
+          ${!canAssign?`<div class="info-box"><b>لا يمكن التعيين الآن</b><small>${incompleteRequired.length?'هناك متطلبات مطلوبة غير مكتملة.':'العميل لم يرسل الطلب للوكلاء بعد.'}</small></div>`:''}
+          <form id="adminAssignForm">
+            <select name="agent" required ${canAssign?'':'disabled'}>
+              <option value="">${o.assigned_agent_id?'اختر وكيلاً لإعادة التعيين':'اختر وكيلاً للتعيين'}</option>
+              ${eligibleAgents.filter(a=>a.user_id!==o.assigned_agent_id).map(a=>`<option value="${a.user_id}">${esc(agentNames[a.user_id]?.full_name||agentNames[a.user_id]?.email||a.user_id)}${a.available?' • متاح':' • غير متاح'}</option>`).join('')}
+            </select>
+            <input name="reason" ${o.assigned_agent_id?'required':''} ${canAssign?'':'disabled'} placeholder="${o.assigned_agent_id?'سبب إعادة التعيين':'سبب التعيين (اختياري)'}">
+            <button class="secondary full" ${canAssign&&eligibleAgents.filter(a=>a.user_id!==o.assigned_agent_id).length?'':'disabled'}>${o.assigned_agent_id?'إعادة تعيين الوكيل':'تعيين الوكيل'}</button>
+          </form>
+          <button class="danger full" data-admin-cancel="${o.id}">إلغاء الطلب</button>
+        `:''}
+      </div>
+    </details>
+
+    ${(assignmentHistory||[]).length?`<details class="order-section">
+      <summary>سجل التعيين</summary>
+      <div class="order-section-body timeline">
+        ${assignmentHistory.map(x=>`<div><b>${x.to_agent_id?'تعيين '+esc(agentNames[x.to_agent_id]?.full_name||'وكيل'):'إزالة التعيين'}</b><small>${esc(x.reason||'')}${x.created_at?' • '+new Date(x.created_at).toLocaleString('ar-LB'):''}</small></div>`).join('')}
+      </div>
+    </details>`:''}
+
+    <details class="order-section">
+      <summary>التتبّع (${events.length})</summary>
+      <div class="order-section-body timeline">
+        ${events.map(e=>`<div><b>${esc(e.label_ar)}</b><small>${e.note?esc(e.note)+' • ':''}${new Date(e.created_at).toLocaleString('ar-LB')}</small></div>`).join('')||'<div class="empty">لا توجد أحداث.</div>'}
+      </div>
+    </details>
   </section>`);
   bind();
 }
