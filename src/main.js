@@ -1113,10 +1113,10 @@ async function admin(section='overview'){
   clearLive();
   if(profile?.role!=='admin')return go('home');
 
-  const allowed=new Set(['overview','orders','agents','services','support']);
+  const allowed=new Set(['overview','orders','agents','customers','services','support']);
   if(!allowed.has(section))section='overview';
 
-  const [{data:a},{data:srv},{data:o},{data:reqs},{data:disputes},{data:workflow},{data:bundles},{data:incompleteReqs},{data:failedPayments}]=await Promise.all([
+  const [{data:a},{data:srv},{data:o},{data:reqs},{data:disputes},{data:workflow},{data:bundles},{data:incompleteReqs},{data:failedPayments},{data:customerVerifications}]=await Promise.all([
     supabase.from('agent_profiles').select('*').order('created_at',{ascending:false}),
     supabase.from('services').select('*').order('sort_order'),
     supabase.from('orders').select('*').order('created_at',{ascending:false}).limit(50),
@@ -1125,7 +1125,8 @@ async function admin(section='overview'){
     supabase.from('service_workflow_steps').select('*').order('sort_order'),
     supabase.from('service_bundle_items').select('*').order('sort_order'),
     supabase.from('order_requirements').select('order_id').eq('required',true).is('completed_at',null),
-    supabase.from('payments').select('order_id,status').eq('status','failed')
+    supabase.from('payments').select('order_id,status').eq('status','failed'),
+    supabase.from('customer_identity_verifications').select('*').order('submitted_at',{ascending:false})
   ]);
 
   const ids=(a||[]).map(x=>x.user_id),names={};
@@ -1134,8 +1135,15 @@ async function admin(section='overview'){
     (p||[]).forEach(x=>names[x.id]=x);
   }
 
+  const customerIds=(customerVerifications||[]).map(x=>x.user_id),customerNames={};
+  if(customerIds.length){
+    const {data:p}=await supabase.from('profiles').select('id,full_name,email,phone').in('id',customerIds);
+    (p||[]).forEach(x=>customerNames[x.id]=x);
+  }
+
   const activeOrders=(o||[]).filter(x=>!['completed','cancelled'].includes(x.status)).length;
   const pendingAgents=(a||[]).filter(x=>x.verification_status==='pending').length;
+  const pendingCustomers=(customerVerifications||[]).filter(x=>x.status==='pending').length;
   const activeServices=(srv||[]).filter(x=>x.active).length;
   const openSupport=(disputes||[]).length;
   const incompleteOrderIds=new Set((incompleteReqs||[]).map(x=>x.order_id));
@@ -1148,12 +1156,13 @@ async function admin(section='overview'){
     && (incompleteOrderIds.has(x.id)||x.customer_submission_ready===false)
   );
   const failedPaymentOrders=new Set((failedPayments||[]).map(x=>x.order_id));
-  const adminAttention=pendingAgents+openSupport+refundOrders.length+readyUnassigned.length+(paymentsEnabled?failedPaymentOrders.size:0);
+  const adminAttention=pendingAgents+pendingCustomers+openSupport+refundOrders.length+readyUnassigned.length+(paymentsEnabled?failedPaymentOrders.size:0);
 
   const nav=`<div class="adminnav">
     <button class="${section==='overview'?'active':''}" data-go="admin">الرئيسية</button>
     <button class="${section==='orders'?'active':''}" data-go="admin/orders">الطلبات</button>
     <button class="${section==='agents'?'active':''}" data-go="admin/agents">الوكلاء</button>
+    <button class="${section==='customers'?'active':''}" data-go="admin/customers">العملاء</button>
     <button class="${section==='services'?'active':''}" data-go="admin/services">الخدمات</button>
     <button class="${section==='support'?'active':''}" data-go="admin/support">الدعم</button>
   </div>`;
@@ -1165,6 +1174,7 @@ async function admin(section='overview'){
       <div class="adminmetrics">
         <button data-go="admin/orders"><small>طلبات جارية</small><b>${activeOrders}</b></button>
         <button data-go="admin/agents"><small>وكلاء للمراجعة</small><b>${pendingAgents}</b></button>
+        <button data-go="admin/customers"><small>هويات للمراجعة</small><b>${pendingCustomers}</b></button>
         <button data-go="admin/support"><small>دعم مفتوح</small><b>${openSupport}</b></button>
         <button><small>بحاجة لتدخل</small><b>${adminAttention}</b></button>
       </div>
@@ -1173,6 +1183,7 @@ async function admin(section='overview'){
         <div class="adminsectionhead"><h3>بحاجة لتدخل</h3><small>${adminAttention}</small></div>
         <div class="stack">
           ${pendingAgents?`<button class="action-row" data-go="admin/agents"><span><b>مراجعة الوكلاء</b><small>${pendingAgents} حساب بانتظار المراجعة</small></span><strong>فتح</strong></button>`:''}
+          ${pendingCustomers?`<button class="action-row" data-go="admin/customers"><span><b>مراجعة هويات العملاء</b><small>${pendingCustomers} مستند بانتظار المراجعة</small></span><strong>فتح</strong></button>`:''}
           ${openSupport?`<button class="action-row" data-go="admin/support"><span><b>طلبات الدعم</b><small>${openSupport} طلب مفتوح</small></span><strong>فتح</strong></button>`:''}
           ${refundOrders.map(x=>`<button class="action-row" data-admin-order="${x.id}"><span><b>${x.public_code}</b><small>رد مبلغ بانتظار المعالجة</small></span><strong>فتح</strong></button>`).join('')}
           ${readyUnassigned.map(x=>`<button class="action-row" data-admin-order="${x.id}"><span><b>${x.public_code}</b><small>جاهز للوكلاء ولم يتم تعيين وكيل بعد</small></span><strong>فتح</strong></button>`).join('')}
@@ -1215,6 +1226,20 @@ async function admin(section='overview'){
         <span><b>${esc(names[x.user_id]?.full_name||names[x.user_id]?.email||x.user_id)}</b><small>${esc(names[x.user_id]?.phone||'')}</small></span>
         <i>${x.verification_status==='approved'?'معتمد':x.verification_status==='pending'?'قيد المراجعة':x.verification_status==='suspended'?'موقوف':'مرفوض'}</i>
       </button>`).join('')||'<div class="empty">لا يوجد وكلاء.</div>'}</div>
+    </section>`;
+  }
+
+  if(section==='customers'){
+    body=`<section class="adminpanel">
+      <div class="adminsectionhead"><h3>العملاء</h3><small>${(customerVerifications||[]).length} تحقق</small></div>
+      <div class="stack">${(customerVerifications||[]).map(v=>`<div class="adminrow verifyadmin">
+        <span><b>${esc(customerNames[v.user_id]?.full_name||customerNames[v.user_id]?.email||v.user_id)}</b><small>${esc(customerNames[v.user_id]?.phone||'')} • ${v.status==='approved'?'معتمد':v.status==='rejected'?'مرفوض':'قيد المراجعة'}${v.rejection_reason?' • '+esc(v.rejection_reason):''}</small></span>
+        <div class="verifyactions">
+          <button class="secondary compact" data-customer-id-view="${esc(v.storage_path)}">فتح الهوية</button>
+          ${v.status!=='approved'?`<button class="primary compact" data-customer-id-review="${v.user_id}" data-review-status="approved">اعتماد</button>`:''}
+          ${v.status!=='rejected'?`<button class="secondary compact" data-customer-id-review="${v.user_id}" data-review-status="rejected">رفض</button>`:''}
+        </div>
+      </div>`).join('')||'<div class="empty">لا توجد هويات مرفوعة.</div>'}</div>
     </section>`;
   }
 
