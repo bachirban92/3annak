@@ -610,6 +610,12 @@ async function customerDetail(id){
       <strong>${money(payment?.amount??o.total_amount)}</strong>
     </div>`:''}
 
+    ${payment?.status!=='paid'&&o.assigned_agent_id?`<div class="completebox">
+      <span class="completecheck">$</span>
+      <div><b>رمز الدفع النقدي</b><small>عندما يخبرك الوكيل أن الطلب جاهز، ادفع المبلغ ثم أعطه الرمز.</small><div data-cash-pin-result></div></div>
+      <button class="secondary compact" data-generate-cash-pin="${o.id}">إظهار الرمز</button>
+    </div>`:''}
+
     ${incompleteRequired.length?`<div class="completebox requirementgate">
       <span class="completecheck">!</span>
       <div><b>أكمل المعلومات المطلوبة</b><small>باقي ${incompleteRequired.length} عنصر مطلوب قبل إرسال الطلب للوكلاء.</small></div>
