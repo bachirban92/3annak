@@ -5,7 +5,7 @@ import { renderServicesAdmin, bindServicesAdmin } from './service-admin.js';
 import { renderNewOrder, bindServiceSelection } from './order-form.js';
 
 const app=document.querySelector('#app');
-let session=null,profile=null,services=[],bundleItems=[],serviceRequirements=[],customerProperties=[],customerAddresses=[],deliveryConfig={enabled:false,customer_fee:0,agent_payout:0},paymentsEnabled=false,liveChannel=null;
+let session=null,profile=null,services=[],bundleItems=[],serviceRequirements=[],customerProperties=[],customerAddresses=[],customerIdentity=null,deliveryConfig={enabled:false,customer_fee:0,agent_payout:0},paymentsEnabled=false,liveChannel=null;
 let passwordRecoveryMode=location.hash.includes('type=recovery')||new URLSearchParams(location.search).get('password-reset')==='1';
 
 const labels={
@@ -62,14 +62,18 @@ async function load(){
   const addressesQuery=session
     ?supabase.from('customer_addresses').select('*').order('is_default',{ascending:false}).order('created_at',{ascending:false})
     :Promise.resolve({data:[]});
+  const identityQuery=session
+    ?supabase.from('customer_identity_verifications').select('*').eq('user_id',session.user.id).maybeSingle()
+    :Promise.resolve({data:null});
 
-  const [{data:p},{data:srv},{data:bundles},{data:reqCatalog},{data:savedProps},{data:savedAddresses},{data:deliverySetting},{data:paymentSetting}]=await Promise.all([
+  const [{data:p},{data:srv},{data:bundles},{data:reqCatalog},{data:savedProps},{data:savedAddresses},{data:identity},{data:deliverySetting},{data:paymentSetting}]=await Promise.all([
     profileQuery,
     supabase.from('services').select('*').eq('active',true).order('sort_order'),
     bundlesQuery,
     supabase.from('service_requirements').select('*').eq('active',true).order('sort_order'),
     propertiesQuery,
     addressesQuery,
+    identityQuery,
     supabase.from('app_settings').select('value').eq('key','hard_copy_delivery').maybeSingle(),
     supabase.from('app_settings').select('value').eq('key','payments_enforced').maybeSingle()
   ]);
@@ -80,6 +84,7 @@ async function load(){
   serviceRequirements=reqCatalog||[];
   customerProperties=savedProps||[];
   customerAddresses=savedAddresses||[];
+  customerIdentity=identity||null;
   deliveryConfig=deliverySetting?.value||{enabled:false,customer_fee:0,agent_payout:0};
   paymentsEnabled=paymentSetting?.value?.enabled===true;
 }
@@ -417,6 +422,17 @@ async function accountPage(){
       <button data-go="home">رجوع</button>
     </div>
 
+    ${isCustomer?`<section class="card">
+      <div class="dashboard-panel-head"><h3>التحقق من الهوية</h3><b>${customerIdentity?.status==='approved'?'معتمد':customerIdentity?.status==='pending'?'قيد المراجعة':customerIdentity?.status==='rejected'?'مرفوض':'مطلوب'}</b></div>
+      ${customerIdentity?.status==='approved'
+        ?'<div class="info-box"><b>تم التحقق من هويتك</b><small>يمكنك تقديم الطلبات.</small></div>'
+        :`<div class="info-box"><b>${customerIdentity?.status==='pending'?'المستند قيد المراجعة':customerIdentity?.status==='rejected'?'تعذر اعتماد المستند':'ارفع إثبات الهوية'}</b><small>${customerIdentity?.status==='rejected'&&customerIdentity?.rejection_reason?esc(customerIdentity.rejection_reason):'هوية أو جواز سفر واضح. PDF أو صورة، بحد أقصى 10MB.'}</small></div>
+          <div class="identity-upload">
+            <input id="customerIdentityFile" type="file" accept=".pdf,image/jpeg,image/png,image/webp">
+            <button class="primary full" data-customer-id-upload>${customerIdentity?'إعادة رفع المستند':'رفع المستند'}</button>
+          </div>`}
+    </section>`:''}
+
     <section class="card">
       <h3>المعلومات الشخصية</h3>
       <form id="accountProfileForm">
@@ -524,6 +540,13 @@ function resetPasswordPage(){
 function newOrder(){
   if(isAnonymousUser())return customerAuthChoice();
   if(profile?.role!=='customer')return profile?.role==='agent'?agentPortal():go('admin');
+  if(customerIdentity?.status!=='approved'){
+    return shell(`<section class="card narrow">
+      <div class="title"><h2>التحقق من الهوية</h2><button data-go="customer">رجوع</button></div>
+      <div class="info-box"><b>${customerIdentity?.status==='pending'?'هويتك قيد المراجعة':customerIdentity?.status==='rejected'?'يرجى إعادة رفع الهوية':'تحقق من هويتك أولاً'}</b><small>يلزم التحقق مرة واحدة قبل تقديم أول طلب.</small></div>
+      <button class="primary full" data-go="account">فتح حسابي</button>
+    </section>`);
+  }
   return shell(renderNewOrder({services,bundleItems,serviceRequirements,savedProperties:customerProperties,savedAddresses:customerAddresses,deliveryConfig,profile,gov,esc,money}));
 }
 async function orders(){
