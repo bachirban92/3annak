@@ -2611,6 +2611,48 @@ function bind(){
     error?toast(error.message,true):(toast('تم تسجيل رد المبلغ'),adminOrder(x.dataset.orderId));
   });
 
+  document.querySelectorAll('[data-payout-account-verify]').forEach(x=>x.onclick=async()=>{
+    busy(x,true);
+    const {error}=await supabase.rpc('admin_set_agent_payout_account_verified',{
+      p_agent_id:x.dataset.payoutAccountVerify,
+      p_verified:x.dataset.verifyValue==='true'
+    });
+    busy(x,false);
+    error?toast(error.message,true):(toast(x.dataset.verifyValue==='true'?'تم اعتماد حساب التحويل':'تم إلغاء اعتماد الحساب'),adminAgent(x.dataset.payoutAccountVerify));
+  });
+
+  document.querySelectorAll('[data-create-payout]').forEach(x=>x.onclick=async()=>{
+    if(!confirm('إنشاء دفعة من كامل الرصيد المتاح؟'))return;
+    busy(x,true);
+    const {error}=await supabase.rpc('create_payout_batch',{p_agent_id:x.dataset.createPayout,p_currency:'USD'});
+    busy(x,false);
+    error?toast(
+      error.message==='payout_account_required'?'لا يوجد حساب تحويل محفوظ':
+      error.message==='payout_account_not_verified'?'يجب اعتماد حساب التحويل أولاً':
+      error.message,true
+    ):(toast('تم إنشاء الدفعة'),adminAgent(x.dataset.createPayout));
+  });
+
+  document.querySelectorAll('[data-payout-paid]').forEach(x=>x.onclick=async()=>{
+    const reference=prompt('مرجع التحويل (اختياري)')||'';
+    busy(x,true);
+    const {error}=await supabase.rpc('admin_mark_payout_paid',{
+      p_payout_id:x.dataset.payoutPaid,
+      p_provider:'manual',
+      p_reference:reference||null
+    });
+    busy(x,false);
+    error?toast(error.message,true):(toast('تم تسجيل الدفعة كمدفوعة'),adminAgent(x.dataset.agentId));
+  });
+
+  document.querySelectorAll('[data-payout-cancel]').forEach(x=>x.onclick=async()=>{
+    if(!confirm('إلغاء هذه الدفعة وإعادة الرصيد إلى المتاح؟'))return;
+    busy(x,true);
+    const {error}=await supabase.rpc('admin_cancel_payout',{p_payout_id:x.dataset.payoutCancel});
+    busy(x,false);
+    error?toast(error.message,true):(toast('تم إلغاء الدفعة وإعادة الرصيد'),adminAgent(x.dataset.agentId));
+  });
+
   document.querySelectorAll('[data-admin-cancel]').forEach(x=>x.onclick=async()=>{
     if(!confirm('إلغاء هذا الطلب؟'))return;
     const {error}=await supabase.rpc('admin_cancel_order',{p_order_id:x.dataset.adminCancel,p_reason:''});
