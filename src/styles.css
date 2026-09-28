@@ -347,3 +347,89 @@ h3{margin:26px 0 11px;font-size:19px}
   .agent-assigned-card{align-items:flex-start;flex-direction:column}
   .agent-assigned-card button{width:100%}
 }
+
+/* Mobile hardening */
+html,body{max-width:100%;overflow-x:hidden}
+body{min-height:100dvh}
+button,a,input,select,textarea{touch-action:manipulation}
+button{min-height:44px}
+.compact{min-height:40px}
+header{
+  min-height:72px;height:auto;
+  padding-top:env(safe-area-inset-top);
+  padding-left:max(18px,env(safe-area-inset-left));
+  padding-right:max(18px,env(safe-area-inset-right));
+}
+main{
+  padding-bottom:max(88px,calc(72px + env(safe-area-inset-bottom)));
+}
+.toast{
+  left:max(16px,env(safe-area-inset-left));
+  right:max(16px,env(safe-area-inset-right));
+  bottom:max(16px,env(safe-area-inset-bottom));
+  width:auto;
+}
+.ordersummary{bottom:max(10px,env(safe-area-inset-bottom))}
+.file-viewer{
+  padding-top:max(16px,env(safe-area-inset-top));
+  padding-bottom:max(16px,env(safe-area-inset-bottom));
+  padding-left:max(16px,env(safe-area-inset-left));
+  padding-right:max(16px,env(safe-area-inset-right));
+}
+.servicecopy,.order-dashboard-main,.order-dashboard-state,.adminrow>span,.job>span{min-width:0}
+.servicecopy b,.adminrow b,.job b,.order-dashboard-row b,.order-dashboard-row small{overflow-wrap:anywhere}
+@media(max-width:760px){
+  .adminnav{
+    display:flex;
+    overflow-x:auto;
+    scrollbar-width:none;
+    position:sticky;
+    top:calc(72px + env(safe-area-inset-top));
+    gap:8px;
+    padding:6px 0 10px;
+  }
+  .adminnav::-webkit-scrollbar{display:none}
+  .adminnav button{flex:0 0 auto;min-width:108px}
+}
+@media(max-width:620px){
+  input,select,textarea{font-size:16px}
+  main{
+    padding-left:max(14px,env(safe-area-inset-left));
+    padding-right:max(14px,env(safe-area-inset-right));
+    padding-bottom:max(82px,calc(70px + env(safe-area-inset-bottom)));
+  }
+  .title{align-items:flex-start}
+  .title h2{overflow-wrap:anywhere}
+  .servicetop{flex-wrap:wrap}
+  .delivery-option{align-items:flex-start;flex-wrap:wrap}
+  .delivery-option strong{margin-inline-start:auto}
+  .ordersummary{
+    left:0;right:0;
+    margin-left:0;margin-right:0;
+    padding-bottom:max(14px,calc(10px + env(safe-area-inset-bottom)));
+  }
+  .file-viewer{padding:0}
+  .file-viewer-card{
+    width:100%;height:100dvh;border-radius:0;
+    padding-top:env(safe-area-inset-top);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  .file-viewer-head{align-items:flex-start}
+  .adminrow{align-items:flex-start;gap:10px}
+  .adminrow .row-actions,.paymentactions{width:100%}
+  .paymentactions button{flex:1}
+}
+@media(max-width:480px){
+  .role-metrics{gap:7px}
+  .role-metrics>div{padding:11px 9px}
+  .role-metrics small{font-size:11px}
+  .role-metrics b{font-size:18px}
+  .role-dashboard-actions{grid-template-columns:1fr}
+  .role-dashboard-actions .primary{grid-column:auto}
+  .adminrow{flex-direction:column}
+  .adminrow>div:last-child{width:100%}
+  .adminrow .row-actions button{flex:1}
+  .job{grid-template-columns:1fr}
+  .job>strong{justify-self:start}
+  .job .primary{grid-column:auto;width:100%}
+}
