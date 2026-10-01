@@ -1107,6 +1107,7 @@ async function adminAccess(){
       <input name="password" type="password" autocomplete="current-password" required placeholder="كلمة المرور">
       <button class="primary full">دخول</button>
     </form>
+    <button class="ghost full" data-go="forgot-password">نسيت كلمة المرور؟</button>
   </section>`);
   bind();
 }
