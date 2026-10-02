@@ -635,7 +635,7 @@ async function customerDetail(id){
     payment?.status==='paid'?`مدفوع${paymentMethodLabel?' • '+paymentMethodLabel:''}`:
     payment?.status==='refunded'?'تم رد المبلغ':
     payment?.status==='failed'?'فشل الدفع':
-    o.assigned_agent_id?'الدفع مستحق الآن':'الدفع غير مستحق بعد';
+    o.assigned_agent_id?'الدفع نقداً عند انتهاء العمل':'الدفع غير مستحق بعد';
 
   const customerAction=incompleteRequired.length
     ?{kind:'action',title:'مطلوب منك الآن',text:`أكمل ${incompleteRequired.length} عنصر مطلوب ليتم إرسال الطلب للوكلاء.`}
@@ -1077,7 +1077,7 @@ async function agentJob(id){
         <b>${deliveryOrder.hard_copy_delivered_at?'تم التوصيل':'مطلوب التوصيل'}</b>
         <span>${esc([deliveryOrder.delivery_address_line1,deliveryOrder.delivery_address_line2,deliveryOrder.delivery_city,deliveryOrder.delivery_region,deliveryOrder.delivery_country].filter(Boolean).join(' • '))}</span>
       </div>
-      ${deliveryOrder.hard_copy_delivered_at?'<span class="verifiedmark">✓</span>':`<button class="primary compact" data-confirm-hard-copy="${o.id}">تأكيد التوصيل</button>`}
+      ${deliveryOrder.hard_copy_delivered_at?'<span class="verifiedmark">✓</span>':payment?.status==='paid'?`<button class="primary compact" data-confirm-hard-copy="${o.id}">تأكيد التوصيل</button>`:'<button class="secondary compact" disabled>أكّد الدفع أولاً</button>'}
     </section>`:''}
 
     ${(requirements||[]).length?`<h3>معلومات العميل</h3>
@@ -2658,7 +2658,14 @@ function bind(){
     busy(x,true,'جارٍ التأكيد...');
     const {error}=await supabase.rpc('confirm_hard_copy_delivery',{p_order_id:x.dataset.confirmHardCopy,p_note:null});
     busy(x,false);
-    error?toast(error.message,true):(toast('تم تأكيد التوصيل'),agentJob(x.dataset.confirmHardCopy));
+    if(error){
+      const msg=error.message==='payment_required'?'أكّد الدفع النقدي أولاً':
+        error.message==='delivery_not_available'?'لا يمكن تأكيد التوصيل لهذا الطلب':error.message;
+      toast(msg,true);
+    }else{
+      toast('تم تأكيد التوصيل');
+      agentJob(x.dataset.confirmHardCopy);
+    }
   });
 
   document.querySelectorAll('[data-status]').forEach(x=>x.onclick=async()=>{
@@ -2667,7 +2674,9 @@ function bind(){
     if(error){
       busy(x,false);
       const msg=error.message==='deliverables_incomplete'?'أكمل المستندات النهائية أولاً':
-        error.message==='workflow_incomplete'?'أكمل مراحل التنفيذ أولاً':error.message;
+        error.message==='workflow_incomplete'?'أكمل مراحل التنفيذ أولاً':
+        error.message==='payment_required'?'أكّد الدفع أولاً':
+        error.message==='hard_copy_delivery_incomplete'?'أكّد توصيل النسخة الورقية أولاً':error.message;
       toast(msg,true);
     }else{toast('تم تحديث الحالة');agentJob(x.dataset.id)}
   });
