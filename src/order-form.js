@@ -92,6 +92,10 @@ export function renderNewOrder({services,bundleItems,serviceRequirements,savedPr
           <div><small>الاستلام</small><b id="reviewDelivery">نسخة إلكترونية</b></div>
           <div><small>الإجمالي</small><b id="reviewTotal"></b></div>
         </div>
+        <label class="terms-check">
+          <input type="checkbox" name="terms_agreed" required>
+          <span>أوافق على <button type="button" class="linkbutton" data-go="terms">الشروط والأحكام</button> وألتزم بدفع قيمة الطلب عند إنجاز الخدمة، وأفهم أن رمز الدفع النقدي لا يُعطى للوكيل إلا بعد دفع المبلغ.</span>
+        </label>
       </section>
 
       <div class="ordersummary" id="orderSummary" hidden>
@@ -296,6 +300,11 @@ export function bindServiceSelection({services,bundleItems,serviceRequirements,s
     if(form.elements.delivery_mode?.value==='hard_copy'&&!form.elements.delivery_address_id?.value){
       e.preventDefault();
       toast?.('اختر عنوان التوصيل للنسخة الورقية',true);
+      return;
+    }
+    if(!form.elements.terms_agreed?.checked){
+      e.preventDefault();
+      toast?.('وافق على الشروط قبل تأكيد الطلب',true);
     }
   });
 }
