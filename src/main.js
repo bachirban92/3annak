@@ -7,6 +7,7 @@ import { renderNewOrder, bindServiceSelection } from './order-form.js';
 const app=document.querySelector('#app');
 let session=null,profile=null,services=[],bundleItems=[],serviceRequirements=[],customerProperties=[],customerAddresses=[],customerIdentity=null,deliveryConfig={enabled:false,customer_fee:0,agent_payout:0},paymentsEnabled=false,liveChannel=null;
 let passwordRecoveryMode=location.hash.includes('type=recovery')||new URLSearchParams(location.search).get('password-reset')==='1';
+const TERMS_VERSION='2026-10-02';
 
 const labels={
   submitted:'تم استلام الطلب',
@@ -44,7 +45,7 @@ function shell(body){
   const anonymous=isAnonymousUser();
   if(profile?.role==='admin') right=`<button class="toplink withicon" data-go="admin">${icon('settings')}<span>الإدارة</span></button>`;
   else if(!anonymous&&['customer','agent'].includes(profile?.role)) right=`<button class="toplink withicon" data-go="account">${icon('orders')}<span>حسابي</span></button>`;
-  return `<header><button class="brand" data-go="home">عنّك</button>${right}</header><main>${body}</main>`;
+  return `<header><button class="brand" data-go="home">عنّك</button>${right}</header><main>${body}</main><footer class="site-footer"><button data-go="privacy">سياسة الخصوصية</button><span>•</span><button data-go="terms">الشروط والأحكام</button></footer>`;
 }
 async function load(){
   const {data:{session:s}}=await supabase.auth.getSession();
@@ -88,6 +89,54 @@ async function load(){
   deliveryConfig=deliverySetting?.value||{enabled:false,customer_fee:0,agent_payout:0};
   paymentsEnabled=paymentSetting?.value?.enabled===true;
 }
+function privacyPage(){
+  clearLive();
+  app.innerHTML=shell(`<section class="card legalpage">
+    <div class="title"><h2>سياسة الخصوصية</h2><button data-go="home">رجوع</button></div>
+    <small>آخر تحديث: 2 تشرين الأول 2026</small>
+    <h3>البيانات التي نجمعها</h3>
+    <p>نجمع بيانات الحساب والتواصل، معلومات العقار والطلب، المستندات التي يرفعها المستخدم، بيانات الدفع وحالة الطلب، وبيانات الوكلاء اللازمة لتنفيذ الخدمة.</p>
+    <h3>التحقق من الهوية</h3>
+    <p>قد نطلب من العميل إثبات هوية للتحقق من الحساب وتقليل إساءة الاستخدام والطلبات الوهمية. ملف الهوية خاص ولا يظهر للوكلاء أو للعامة.</p>
+    <h3>مدة الاحتفاظ بملف الهوية</h3>
+    <p>بعد مراجعة الهوية، نحتفظ بصورة ملف الهوية لمدة تصل إلى 90 يوماً ثم نحذف الملف تلقائياً. نحتفظ بعد ذلك بحالة التحقق وتاريخ المراجعة وسجل التدقيق اللازم لإدارة المنصة والنزاعات.</p>
+    <h3>استخدام البيانات</h3>
+    <p>نستخدم البيانات لإنشاء الطلبات، مطابقة الطلب مع وكيل مؤهل، متابعة التنفيذ، تسليم المستندات، تسجيل الدفع، معالجة الدعم والنزاعات، وحماية المنصة.</p>
+    <h3>مشاركة البيانات</h3>
+    <p>نعرض للوكيل المعيّن فقط المعلومات اللازمة لتنفيذ الطلب. لا نبيع البيانات الشخصية. قد نستخدم مزودي خدمات تقنيين أو دفع عند الحاجة لتشغيل المنصة.</p>
+    <h3>المستندات والأمان</h3>
+    <p>المستندات الحساسة تحفظ في مساحات تخزين خاصة ويكون الوصول إليها حسب دور المستخدم والطلب المرتبط بها.</p>
+    <h3>التواصل</h3>
+    <p>يمكنك التواصل مع إدارة عنّك من خلال قنوات الدعم داخل المنصة لأي استفسار متعلق ببياناتك.</p>
+  </section>`);
+  bind();
+}
+
+function termsPage(){
+  clearLive();
+  app.innerHTML=shell(`<section class="card legalpage">
+    <div class="title"><h2>الشروط والأحكام</h2><button data-go="home">رجوع</button></div>
+    <small>الإصدار: ${TERMS_VERSION}</small>
+    <h3>طبيعة المنصة</h3>
+    <p>عنّك منصة تنسّق طلبات مستندات عقارية بين العملاء ووكلاء مستقلين. الأسعار الظاهرة ثابتة للخدمة المحددة ما لم يظهر خلاف ذلك بوضوح قبل تأكيد الطلب.</p>
+    <h3>تأكيد الطلب</h3>
+    <p>عند تأكيد الطلب يقر العميل بصحة البيانات التي أدخلها ويوافق على أن يبدأ الوكيل المقبول بتنفيذ الخدمة وفق تفاصيل الطلب.</p>
+    <h3>الدفع النقدي</h3>
+    <p>في الطلبات النقدية، يدفع العميل المبلغ المستحق للوكيل بعد إنجاز العمل وقبل التسليم النهائي. لا يجوز إعطاء رمز تأكيد الدفع للوكيل إلا بعد تسليم المبلغ نقداً.</p>
+    <h3>رمز تأكيد الدفع</h3>
+    <p>إدخال الوكيل للرمز الصحيح الذي سلّمه العميل يعد تأكيداً داخل المنصة بأن الدفعة النقدية المرتبطة بذلك الطلب قد تم تسليمها للوكيل.</p>
+    <h3>تسليم المستندات</h3>
+    <p>تبقى المستندات النهائية غير متاحة للعميل حتى تأكيد الدفع وإكمال الطلب. في حال النسخة الورقية، يجب أيضاً تسجيل التسليم حسب آلية الطلب.</p>
+    <h3>الإلغاء والاسترداد والنزاعات</h3>
+    <p>تخضع إمكانية الإلغاء أو الاسترداد لمرحلة الطلب وما تم إنجازه فعلياً. يمكن للعميل أو الوكيل فتح طلب دعم عند وجود نزاع، وتحتفظ الإدارة بسجل الطلب والدفع والأحداث للمراجعة.</p>
+    <h3>الحساب والهوية</h3>
+    <p>يجب استخدام بيانات صحيحة. قد تتطلب المنصة التحقق من الهوية قبل السماح بتقديم الطلبات. إساءة استخدام الحساب أو تقديم معلومات مزورة قد يؤدي إلى تعليق الحساب.</p>
+    <h3>حدود الخدمة</h3>
+    <p>قد تتأثر مدة الإنجاز بإجراءات الدوائر الرسمية أو توفر السجلات أو ظروف خارجة عن سيطرة المنصة أو الوكيل. أي وقت متوقع يظهر في المنصة هو تقديري ما لم ينص الطلب على خلاف ذلك.</p>
+  </section>`);
+  bind();
+}
+
 function home(){
   return shell(`<section class="hero rolehome">
     <small>عنّك</small>
@@ -135,6 +184,7 @@ function customerRegister(){
       <input name="phone" required placeholder="رقم الهاتف">
       <input name="password" type="password" minlength="8" autocomplete="new-password" required placeholder="كلمة المرور">
       <button class="primary full">إنشاء الحساب</button>
+      <small class="legal-consent">بإنشاء الحساب أنت توافق على <button type="button" class="linkbutton" data-go="terms">الشروط والأحكام</button> واطلعت على <button type="button" class="linkbutton" data-go="privacy">سياسة الخصوصية</button>.</small>
     </form>
   </section>`);
   bind();
@@ -1238,7 +1288,7 @@ async function admin(section='overview'){
       <div class="stack">${(customerVerifications||[]).map(v=>`<div class="adminrow verifyadmin">
         <span><b>${esc(customerNames[v.user_id]?.full_name||customerNames[v.user_id]?.email||v.user_id)}</b><small>${esc(customerNames[v.user_id]?.phone||'')} • ${v.status==='approved'?'معتمد':v.status==='rejected'?'مرفوض':'قيد المراجعة'}${v.rejection_reason?' • '+esc(v.rejection_reason):''}</small></span>
         <div class="verifyactions">
-          <button class="secondary compact" data-customer-id-view="${esc(v.storage_path)}">فتح الهوية</button>
+          ${v.storage_path?`<button class="secondary compact" data-customer-id-view="${esc(v.storage_path)}">فتح الهوية</button>`:'<small>تم حذف ملف الهوية بعد انتهاء مدة الاحتفاظ</small>'}
           ${v.status!=='approved'?`<button class="primary compact" data-customer-id-review="${v.user_id}" data-review-status="approved">اعتماد</button>`:''}
           ${v.status!=='rejected'?`<button class="secondary compact" data-customer-id-review="${v.user_id}" data-review-status="rejected">رفض</button>`:''}
         </div>
@@ -1717,6 +1767,8 @@ function render(){
     return accountPage();
   }
 
+  if(r==='privacy')return privacyPage();
+  if(r==='terms')return termsPage();
   if(r==='forgot-password')return forgotPasswordPage();
   if(r==='notifications'){
     if(anonymous||!['customer','agent'].includes(profile?.role))return go('home');
@@ -2385,6 +2437,13 @@ function bind(){
       }
     }
 
+    const acceptedTerms=await supabase.rpc('accept_order_terms',{p_order_id:orderId,p_terms_version:TERMS_VERSION});
+    if(acceptedTerms.error){
+      busy(b,false);
+      toast(acceptedTerms.error.message,true);
+      return customerDetail(orderId);
+    }
+
     const finalized=await supabase.rpc('finalize_order_submission',{p_order_id:orderId});
     if(finalized.error){
       busy(b,false);
@@ -2711,11 +2770,14 @@ function bind(){
   });
 
   document.querySelectorAll('[data-finalize-order]').forEach(x=>x.onclick=async()=>{
+    if(!confirm('بتأكيد الإرسال أنت توافق على الشروط الحالية وتلتزم بدفع قيمة الطلب عند إنجاز الخدمة.'))return;
     busy(x,true,'جارٍ الإرسال...');
+    const accepted=await supabase.rpc('accept_order_terms',{p_order_id:x.dataset.finalizeOrder,p_terms_version:TERMS_VERSION});
+    if(accepted.error){busy(x,false);return toast(accepted.error.message,true)}
     const {error}=await supabase.rpc('finalize_order_submission',{p_order_id:x.dataset.finalizeOrder});
     busy(x,false);
     if(error){
-      const msg=error.message==='requirements_incomplete'?'أكمل المعلومات المطلوبة أولاً':error.message;
+      const msg=error.message==='requirements_incomplete'?'أكمل المعلومات المطلوبة أولاً':error.message==='terms_acceptance_required'?'وافق على الشروط أولاً':error.message;
       return toast(msg,true);
     }
     toast('تم إرسال الطلب للوكلاء');
