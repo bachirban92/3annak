@@ -1211,7 +1211,7 @@ async function admin(section='overview'){
   );
   const failedPaymentOrders=new Set((failedPayments||[]).map(x=>x.order_id));
   const opsIssueCount=opsHealth&&opsHealth.ok===false
-    ?['failed_id_purge_cron','overdue_id_files','completed_unpaid_orders','completed_with_incomplete_workflow','completed_missing_final_documents','completed_hard_copy_not_delivered','completed_with_pending_agent_earning'].reduce((sum,key)=>sum+Number(opsHealth[key]||0),0)
+    ?['failed_id_purge_cron','overdue_id_files','completed_unpaid_orders','completed_with_incomplete_workflow','completed_missing_final_documents','completed_hard_copy_not_delivered','completed_with_pending_agent_earning','missing_storage_objects'].reduce((sum,key)=>sum+Number(opsHealth[key]||0),0)
     :0;
   const adminAttention=pendingAgents+pendingCustomers+openSupport+refundOrders.length+readyUnassigned.length+(paymentsEnabled?failedPaymentOrders.size:0)+opsIssueCount;
 
@@ -1255,6 +1255,7 @@ async function admin(section='overview'){
           <div class="account-list-row"><span><b>حذف ملفات الهوية</b><small>فشل المهمة: ${Number(opsHealth?.failed_id_purge_cron||0)} • ملفات متأخرة: ${Number(opsHealth?.overdue_id_files||0)}</small></span></div>
           <div class="account-list-row"><span><b>سلامة الطلبات المكتملة</b><small>بدون دفع: ${Number(opsHealth?.completed_unpaid_orders||0)} • مراحل ناقصة: ${Number(opsHealth?.completed_with_incomplete_workflow||0)} • مستندات ناقصة: ${Number(opsHealth?.completed_missing_final_documents||0)}</small></span></div>
           <div class="account-list-row"><span><b>التوصيل والأرباح</b><small>توصيل ورقي ناقص: ${Number(opsHealth?.completed_hard_copy_not_delivered||0)} • أرباح معلقة: ${Number(opsHealth?.completed_with_pending_agent_earning||0)}</small></span></div>
+          <div class="account-list-row"><span><b>سلامة التخزين</b><small>ملفات مسجلة لكنها مفقودة فعلياً: ${Number(opsHealth?.missing_storage_objects||0)}</small></span></div>
         </div>
       </section>
 
