@@ -1169,7 +1169,7 @@ async function admin(section='overview'){
   const allowed=new Set(['overview','orders','agents','customers','services','support']);
   if(!allowed.has(section))section='overview';
 
-  const [{data:a},{data:srv},{data:o},{data:reqs},{data:disputes},{data:workflow},{data:bundles},{data:incompleteReqs},{data:failedPayments},{data:customerVerifications}]=await Promise.all([
+  const [{data:a},{data:srv},{data:o},{data:reqs},{data:disputes},{data:workflow},{data:bundles},{data:incompleteReqs},{data:failedPayments},{data:customerVerifications},{data:opsHealth}]=await Promise.all([
     supabase.from('agent_profiles').select('*').order('created_at',{ascending:false}),
     supabase.from('services').select('*').order('sort_order'),
     supabase.from('orders').select('*').order('created_at',{ascending:false}).limit(50),
@@ -1179,7 +1179,8 @@ async function admin(section='overview'){
     supabase.from('service_bundle_items').select('*').order('sort_order'),
     supabase.from('order_requirements').select('order_id').eq('required',true).is('completed_at',null),
     supabase.from('payments').select('order_id,status').eq('status','failed'),
-    supabase.from('customer_identity_verifications').select('*').order('submitted_at',{ascending:false})
+    supabase.from('customer_identity_verifications').select('*').order('submitted_at',{ascending:false}),
+    supabase.rpc('admin_get_ops_health')
   ]);
 
   const ids=(a||[]).map(x=>x.user_id),names={};
@@ -1209,7 +1210,10 @@ async function admin(section='overview'){
     && (incompleteOrderIds.has(x.id)||x.customer_submission_ready===false)
   );
   const failedPaymentOrders=new Set((failedPayments||[]).map(x=>x.order_id));
-  const adminAttention=pendingAgents+pendingCustomers+openSupport+refundOrders.length+readyUnassigned.length+(paymentsEnabled?failedPaymentOrders.size:0);
+  const opsIssueCount=opsHealth&&opsHealth.ok===false
+    ?['failed_id_purge_cron','overdue_id_files','completed_unpaid_orders','completed_with_incomplete_workflow','completed_missing_final_documents','completed_hard_copy_not_delivered','completed_with_pending_agent_earning'].reduce((sum,key)=>sum+Number(opsHealth[key]||0),0)
+    :0;
+  const adminAttention=pendingAgents+pendingCustomers+openSupport+refundOrders.length+readyUnassigned.length+(paymentsEnabled?failedPaymentOrders.size:0)+opsIssueCount;
 
   const nav=`<div class="adminnav">
     <button class="${section==='overview'?'active':''}" data-go="admin">الرئيسية</button>
@@ -1230,6 +1234,7 @@ async function admin(section='overview'){
         <button data-go="admin/customers"><small>هويات للمراجعة</small><b>${pendingCustomers}</b></button>
         <button data-go="admin/support"><small>دعم مفتوح</small><b>${openSupport}</b></button>
         <button><small>بحاجة لتدخل</small><b>${adminAttention}</b></button>
+        <button><small>حالة النظام</small><b>${opsHealth?.ok===false?'تنبيه':'سليم'}</b></button>
       </div>
 
       ${adminAttention?`<section class="adminpanel attention-panel">
@@ -1243,6 +1248,15 @@ async function admin(section='overview'){
           ${paymentsEnabled?(o||[]).filter(x=>failedPaymentOrders.has(x.id)).map(x=>`<button class="action-row" data-admin-order="${x.id}"><span><b>${x.public_code}</b><small>فشل الدفع</small></span><strong>فتح</strong></button>`).join(''):''}
         </div>
       </section>`:''}
+
+      <section class="adminpanel">
+        <div class="adminsectionhead"><h3>حالة النظام</h3><small>${opsHealth?.ok===false?'يحتاج مراجعة':'سليم'}</small></div>
+        <div class="stack">
+          <div class="account-list-row"><span><b>حذف ملفات الهوية</b><small>فشل المهمة: ${Number(opsHealth?.failed_id_purge_cron||0)} • ملفات متأخرة: ${Number(opsHealth?.overdue_id_files||0)}</small></span></div>
+          <div class="account-list-row"><span><b>سلامة الطلبات المكتملة</b><small>بدون دفع: ${Number(opsHealth?.completed_unpaid_orders||0)} • مراحل ناقصة: ${Number(opsHealth?.completed_with_incomplete_workflow||0)} • مستندات ناقصة: ${Number(opsHealth?.completed_missing_final_documents||0)}</small></span></div>
+          <div class="account-list-row"><span><b>التوصيل والأرباح</b><small>توصيل ورقي ناقص: ${Number(opsHealth?.completed_hard_copy_not_delivered||0)} • أرباح معلقة: ${Number(opsHealth?.completed_with_pending_agent_earning||0)}</small></span></div>
+        </div>
+      </section>
 
       ${waitingCustomer.length?`<section class="adminpanel">
         <div class="adminsectionhead"><h3>بانتظار العميل</h3><small>${waitingCustomer.length}</small></div>
